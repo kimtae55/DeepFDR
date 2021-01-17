@@ -20,8 +20,6 @@ class GibbsSampler(object):
             for j in range(Ly):
                 label[i][j] = torch.bernoulli(torch.tensor(0.5))  # p = 0.5 to choose 1
 
-        print("c2")
-
         torch.save(label, '../testin.pt')
 
         iteration = 0
@@ -31,11 +29,10 @@ class GibbsSampler(object):
             for i in range(Lx):
                 for j in range(Ly):
                     conditional_distribution = self.model1_eq1(i, j, label, Lx)
-                    label[i][j] = torch.bernoulli(conditional_distribution)
+                    label[i][j] = torch.distributions.Bernoulli(conditional_distribution).sample()
 
             if iter_burn < burn_in:
                 probOverTime[iter_burn] = torch.count_nonzero(label) / (Lx * Ly)
-                print("burn_in: ", iter_burn)
                 iter_burn = iter_burn + 1
             else:
                 iteration += 1
@@ -69,11 +66,11 @@ class GibbsSampler(object):
         if self.in_range(i - 1, j, size):
             sum += label[i - 1][j]
         num = torch.exp((beta * sum + h))
-        denom = 1 + torch.exp(beta * sum + h)
-        return num / denom
+        return 1 - 1 / (1 + num)
 
 if __name__ == "__main__":
     np.random.seed(12345)
+    torch.manual_seed(12345)
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     print(device)
 
@@ -85,13 +82,10 @@ if __name__ == "__main__":
 
     print("GPU: ", torch.cuda.get_device_name(0))
     print("NUM ITERATIONS: ", burn_in)
-    print("c0")
 
     sampler = GibbsSampler()
     label = torch.randn(Lx, Ly)
-    print(label)
     label = label.cuda()
-    print("c1")
     start = time.time()
 
     sampler.run(Lx, Ly, Lz, burn_in, n_iter, label)

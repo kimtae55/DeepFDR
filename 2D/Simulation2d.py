@@ -37,7 +37,7 @@ def run_gibbs(Lx,Ly,Lz,burn_in,n_iter):
     label = np.zeros((Lx, Ly))
     for i in range(Lx):
         for j in range(Ly):
-            label[i][j] = bernoulli.rvs(0.2)  # p = 0.5 to choose 1
+            label[i][j] = bernoulli.rvs(0.5)  # p = 0.5 to choose 1
 
     with open('../test.txt', 'w') as outfile:
         outfile.write('# Array shape: {0}\n'.format(label.shape))

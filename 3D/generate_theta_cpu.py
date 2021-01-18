@@ -4,6 +4,7 @@ import math
 import matplotlib.pyplot as plt
 import plotly.express as px
 import pandas as pd
+import time
 
 def in_range(i, j, k, size):
     return (0 <= i < size) and (0 <= j < size) and (0 <= k < size)
@@ -44,7 +45,7 @@ def run_gibbs(Lx,Ly,Lz,burn_in,n_iter):
             for k in range(Lz):
                 label[i][j][k] = bernoulli.rvs(0.5)  # p = 0.5 to choose 1
 
-    with open('init30x30.txt', 'w') as outfile:
+    with open('../init30x30.txt', 'w') as outfile:
         outfile.write('# Array shape: {0}\n'.format(label.shape))
         outfile.write('# H = 1: {0}\n'.format(np.count_nonzero(label)))
         for data_slice in label:
@@ -69,7 +70,7 @@ def run_gibbs(Lx,Ly,Lz,burn_in,n_iter):
             iteration += 1
             print("sampled: ", iteration)
 
-    with open('beta_02_iter_3000.txt', 'w') as outfile:
+    with open('../beta_02_iter_3000.txt', 'w') as outfile:
         outfile.write('# Array shape: {0}\n'.format(label.shape))
         outfile.write('# H = 1: {0}\n'.format(np.count_nonzero(label)))
         for data_slice in label:
@@ -85,11 +86,18 @@ if __name__ == "__main__":
     Ly = 30
     Lz = 30
 
-    burn_in = 3000
+    burn_in = 2000
     n_iter = 1
+
+    start = time.time()
 
     run_gibbs(Lx, Ly, Lz, burn_in, n_iter)
 
+    end = time.time()
+    print("time elapsed:", end - start)
+
+
+'''
     initdata = np.loadtxt('init30x30.txt').reshape((Lx, Ly, Lz))
     data = np.loadtxt('beta_02_iter_3000.txt').reshape((Lx, Ly, Lz))
     x, y, z = data.nonzero()
@@ -97,7 +105,7 @@ if __name__ == "__main__":
     print(df)
     fig = px.scatter_3d(df,x = 'z',y = 'x',z='y', opacity=0.8)
     fig.show()
-'''
+
     for k in range(Lx):
         fig = plt.figure()
         plt.subplot(1, 2, 1)

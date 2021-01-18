@@ -8,14 +8,19 @@ import matplotlib.pyplot as plt
 
 class Data:
     VOXEL_SIZE = 30
-    SAVE_PATH = os.path.join(os.getcwd(), 'voxels')
-    GROUP0_PATH = os.path.join(os.getcwd(), 'voxels/0/')
-    GROUP1_PATH = os.path.join(os.getcwd(), 'voxels/1/')
-    ZIP_PATH = os.path.join(os.getcwd(), 'voxels.zip')
+    SAVE_PATH = os.path.join(os.getcwd(), '../voxels')
+    GROUP0_PATH = os.path.join(os.getcwd(), '../voxels/0/')
+    GROUP1_PATH = os.path.join(os.getcwd(), '../voxels/1/')
+    ZIP_PATH = os.path.join(os.getcwd(), '../voxels.zip')
 
     def __init__(self):
         self.v = np.empty((Data.VOXEL_SIZE, Data.VOXEL_SIZE, Data.VOXEL_SIZE))
         self.theta = np.empty((Data.VOXEL_SIZE, Data.VOXEL_SIZE, Data.VOXEL_SIZE))
+
+    @staticmethod
+    def loadX(path):
+        x = np.loadtxt(path).reshape((Data.VOXEL_SIZE, Data.VOXEL_SIZE, Data.VOXEL_SIZE))
+        return x
 
     def loadTheta(self, path):
         self.theta = np.loadtxt(path).reshape((Data.VOXEL_SIZE, Data.VOXEL_SIZE, Data.VOXEL_SIZE))
@@ -77,7 +82,7 @@ class Data:
                 for k in range(Data.VOXEL_SIZE):
                     x[i][j][k] = ((1/n0)*v_0[i][j][k] - (1/n1)*v_1[i][j][k]) / (math.sqrt((1/n0)+(1/n1)))
 
-        filename = 'x_val.txt'
+        filename = '../x_val.txt'
         savepath = os.path.join(os.getcwd(),filename)
         with open(savepath, 'w') as outfile:
             outfile.write('# Array shape: {0}\n'.format(x.shape))
@@ -88,18 +93,19 @@ class Data:
 
 
 
-np.random.seed(12345)
-data = Data()
-theta_path = os.path.join(os.getcwd(), 'beta_02_iter_3000.txt')
-data.loadTheta(theta_path)
-#data.generate_v(p_l=0.5, mu_l=0.5, sigma_l=1, L=2, subjects=200, groups=2)
-#data.generate_x(subjects=200)
+if __name__ == "__main__":
+    np.random.seed(12345)
+    data = Data()
+    theta_path = os.path.join(os.getcwd(), '../beta_02_iter_3000.txt')
+    data.loadTheta(theta_path)
+    #data.generate_v(p_l=0.5, mu_l=0.5, sigma_l=1, L=2, subjects=200, groups=2)
+    #data.generate_x(subjects=200)
 
-x = np.loadtxt(os.path.join('x_val.txt')).reshape((Data.VOXEL_SIZE, Data.VOXEL_SIZE, Data.VOXEL_SIZE))
-for k in range(Data.VOXEL_SIZE):
-    fig = plt.figure()
-    plt.subplot(1, 2, 1)
-    plt.imshow(x[k])
-    plt.title('x_statistic')
-    plt.show()
+    x = np.loadtxt(os.path.join('../x_val.txt')).reshape((Data.VOXEL_SIZE, Data.VOXEL_SIZE, Data.VOXEL_SIZE))
+    for k in range(Data.VOXEL_SIZE):
+        fig = plt.figure()
+        plt.subplot(1, 2, 1)
+        plt.imshow(x[k])
+        plt.title('x_statistic')
+        plt.show()
 

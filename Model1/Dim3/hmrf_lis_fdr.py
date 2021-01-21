@@ -1,9 +1,8 @@
 import numpy as np
 import os
-from GenerateData import Data
+from DataUtil import Data
 import math
 from scipy.stats import bernoulli
-
 
 class Util:
     @staticmethod
@@ -85,7 +84,7 @@ class Util:
         return I_inv
 
 
-class Lis:
+class Model1:
     def __init__(self, x_file):
         np.random.seed(12345)
         self.params = {'B': 0,
@@ -110,7 +109,8 @@ class Lis:
                       'burn_in': 1000,
                       'num_samples': 5000,
                       'L': 2,
-                      'newton_max': 3
+                      'newton_max': 3,
+                      'fdr_control': 0.1
                       }
         self.x = Data.loadX(os.path.join(os.getcwd(), x_file))
         self.gamma = np.zeros(self.x.shape)  # P(theta | x)
@@ -268,7 +268,7 @@ class Lis:
 
         # Save B, H, mu, sigma, pl, gamma
         with open('params.txt', 'w') as outfile:
-            for key, value in fdr.params.items():
+            for key, value in self.params.items():
                 outfile.write(str(key) + ': ' + str(value) + '\n')
 
         with open('gamma.txt', 'w') as outfile:
@@ -276,7 +276,43 @@ class Lis:
                 np.savetxt(outfile, data_slice, fmt='%-8.4f')
                 outfile.write('# New z slice\n')
 
-    def computeLis(self):
+    def p_lis(self, gamma_1):
+        # LIS = P(theta = 0 | x)
+        # gamma_1 = P(theta = 1 | x) = 1 - LIS
+        dtype = [('index', float), ('value', float)]
+        lis = np.zeros((Data.VOXEL_SIZE * Data.VOXEL_SIZE * Data.VOXEL_SIZE), dtype=dtype)
+        for vx in range(Data.VOXEL_SIZE):
+            for vy in range(Data.VOXEL_SIZE):
+                for vk in range(Data.VOXEL_SIZE):
+                    index = (vk * Data.VOXEL_SIZE * Data.VOXEL_SIZE) + (vy * Data.VOXEL_SIZE) + vx
+                    lis[index]['index'] = index
+                    lis[index]['value'] = 1 - gamma_1[vx][vy][vk]
+        # sort using lis values
+        np.sort(lis, order='value')
+
+        # Data driven LIS-based FDR procedure
+        sum = 0
+        k = 0
+        signal_lis = np.ones((Data.VOXEL_SIZE, Data.VOXEL_SIZE, Data.VOXEL_SIZE))
+        for j in range(len(lis)):
+            sum += lis[j]['value']
+            if sum > (j+1)*self.const['fdr_control']:
+                k = j
+                break
+
+        for j in range(k):
+            index = lis[j]['index']
+            vk = index // (Data.VOXEL_SIZE*Data.VOXEL_SIZE)  # integer division
+            index -= vk*Data.VOXEL_SIZE*Data.VOXEL_SIZE
+            vy = index // Data.VOXEL_SIZE  # integer division
+            vx = index % Data.VOXEL_SIZE
+            signal_lis[vx][vy][vk] = 0  # reject these voxels, rest are 1
+
+        # Save final signal_file
+        with open('signal.txt', 'w') as outfile:
+            for data_slice in signal_lis:
+                np.savetxt(outfile, data_slice, fmt='%-8.4f')
+                outfile.write('# New z slice\n')
 
         return
 
@@ -377,4 +413,8 @@ class Lis:
 
 
 if __name__ == "__main__":
-    fdr = Lis("../x_val.txt")
+    #gamma_1 = np.loadtxt("../gamma.txt").reshape((Data.VOXEL_SIZE, Data.VOXEL_SIZE, Data.VOXEL_SIZE))
+    #fdr.p_lis(gamma_1)
+    #gamma = np.zeros((Data.VOXEL_SIZE, Data.VOXEL_SIZE, Data.VOXEL_SIZE))
+    fdr = Model1("./Model1/x_val.txt")
+

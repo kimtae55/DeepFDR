@@ -45,7 +45,7 @@ def run_gibbs(Lx,Ly,Lz,burn_in,n_iter):
             for k in range(Lz):
                 label[i][j][k] = bernoulli.rvs(0.5)  # p = 0.5 to choose 1
 
-    with open('../init30x30.txt', 'w') as outfile:
+    with open('../data_15x15x15/init_15x15.txt', 'w') as outfile:
         outfile.write('# Array shape: {0}\n'.format(label.shape))
         outfile.write('# H = 1: {0}\n'.format(np.count_nonzero(label)))
         for data_slice in label:
@@ -70,7 +70,7 @@ def run_gibbs(Lx,Ly,Lz,burn_in,n_iter):
             iteration += 1
             print("sampled: ", iteration)
 
-    with open('../beta_02_iter_3000.txt', 'w') as outfile:
+    with open('../data_15x15x15/beta_02_iter_3000.txt', 'w') as outfile:
         outfile.write('# Array shape: {0}\n'.format(label.shape))
         outfile.write('# H = 1: {0}\n'.format(np.count_nonzero(label)))
         for data_slice in label:
@@ -79,14 +79,14 @@ def run_gibbs(Lx,Ly,Lz,burn_in,n_iter):
 
     time = np.arange(0, burn_in, 1)
     plt.plot(time[0::5],probOverTime[0::5],'o')
-    plt.savefig("beta_02_iter_3000.png")
+    plt.savefig("../data_15x15x15/distribution_15x15x15.png")
 
 if __name__ == "__main__":
-    Lx = 30
-    Ly = 30
-    Lz = 30
+    Lx = 15
+    Ly = 15
+    Lz = 15
 
-    burn_in = 2000
+    burn_in = 1000
     n_iter = 1
 
     start = time.time()

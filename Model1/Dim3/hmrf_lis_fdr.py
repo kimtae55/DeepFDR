@@ -87,8 +87,6 @@ class Util:
 
 class Model1:
     def __init__(self, x_file):
-        from numpy.random import Generator, PCG64
-        np.random.seed(12345)
         self.params = {'B': 0,
                        'H': 0,
                        'B_prev': 0,
@@ -108,7 +106,7 @@ class Model1:
                       'eps2': 1e-3,
                       'eps3': 1e-4,
                       'alpha': 1e-4,
-                      'burn_in': 1000, # 1000
+                      'burn_in': 100, # 1000
                       'num_samples': 32, # 5000
                       'L': 2,
                       'newton_max': 3,
@@ -120,7 +118,7 @@ class Model1:
         self.init = np.zeros(self.x.shape)  # initial theta value for gibb's sampling
         self.H_x = np.zeros(2)
         self.H_mean = np.zeros(2)
-        self.log_sum = 0
+        self.log_sum = np.zeros(1)
         self.U = np.zeros(2)
         self.I_inv = np.zeros((2, 2))
         self.H = np.zeros((self.const['num_samples'], 2))
@@ -139,6 +137,7 @@ class Model1:
         varphi: (10), (11)
         Iterate until convergence using delta (13)
         '''
+        np.random.seed(12345)
 
         # compute first term in hs(t) = h(t) - .... equation
         mu_0 = 0
@@ -175,8 +174,32 @@ class Model1:
                         hs[vx][vy][vk] = self.params['H'] - ln_0[vx][vy][vk] + ln_1
 
             # Gibb's sampler to generate theta and theta_x
+            exp_sum = np.zeros(self.const['num_samples'])
             theta = self.init
             theta_x = self.init
+            iteration = 0
+            iter_burn = 0
+            while iteration < self.const['num_samples']:
+                # do stuff
+                for vx in range(Data.VOXEL_SIZE):
+                    for vy in range(Data.VOXEL_SIZE):
+                        for vk in range(Data.VOXEL_SIZE):
+                            conditional_distribution_x = Util.model1_eq1(self.params['B'], hs[vx][vy][vk],
+                                                                       vx, vy, vk, theta_x, Data.VOXEL_SIZE)
+                            theta_x[vx][vy][vk] = bernoulli.rvs(conditional_distribution_x)   
+                            #print("p, theta: ", conditional_distribution_x, theta_x[vx][vy][vk])
+                if iter_burn < self.const['burn_in']:
+                    iter_burn += 1
+                else:
+                    for vx in range(Data.VOXEL_SIZE):
+                        for vy in range(Data.VOXEL_SIZE):
+                            for vk in range(Data.VOXEL_SIZE):
+                                self.H_x[0] += theta_x[vx][vy][vk] * Util.sum_neighbors(vx, vy, vk, theta_x,
+                                                                                        Data.VOXEL_SIZE)
+                                self.H_x[1] += theta_x[vx][vy][vk]
+                                self.gamma[vx][vy][vk] += theta_x[vx][vy][vk]  # probability that theta = 1
+                    iteration += 1 
+
             iteration = 0
             iter_burn = 0
             while iteration < self.const['num_samples']:
@@ -187,11 +210,7 @@ class Model1:
                             conditional_distribution = Util.model1_eq1(self.params['B'], self.params['H'],
                                                                        vx, vy, vk, theta, Data.VOXEL_SIZE)
                             theta[vx][vy][vk] = bernoulli.rvs(conditional_distribution)
-                            conditional_distribution_x = Util.model1_eq1(self.params['B'], hs[vx][vy][vk],
-                                                                       vx, vy, vk, theta_x, Data.VOXEL_SIZE)
-                            theta_x[vx][vy][vk] = bernoulli.rvs(conditional_distribution_x)
-                            print(conditional_distribution, conditional_distribution_x)
-                            print(theta[vx][vy][vk], theta_x[vx][vy][vk])
+                            # print("p, theta: ", conditional_distribution, theta[vx][vy][vk])
                 if iter_burn < self.const['burn_in']:
                     iter_burn += 1
                 else:
@@ -202,15 +221,9 @@ class Model1:
                                 self.H_mean[0] += theta[vx][vy][vk] * sum
                                 self.H_mean[1] += theta[vx][vy][vk]
 
-                                self.H_x[0] += theta_x[vx][vy][vk] * Util.sum_neighbors(vx, vy, vk, theta_x,
-                                                                                        Data.VOXEL_SIZE)
-                                self.H_x[1] += theta_x[vx][vy][vk]
-
                                 self.H[iteration][0] += theta[vx][vy][vk] * sum
                                 self.H[iteration][1] += theta[vx][vy][vk]
-
-                                self.gamma[vx][vy][vk] += theta_x[vx][vy][vk]  # probability that theta = 1
-                                print(self.H_mean, self.H_x)
+                    exp_sum[iteration] = -1 * self.H[iteration][0] * self.params['B'] - self.H[iteration][1] * self.params['H']
                     iteration += 1
 
             # Monte carlo averages
@@ -224,8 +237,14 @@ class Model1:
                         self.gamma[vx][vy][vk] /= self.const['num_samples']
                         gamma_sum += self.gamma[vx][vy][vk]
             # compute log factor for current varphi
+            # Because np.exp can overflow with large value of exp_sum, a modification is made
+            # where we subtract by max_val. Same is done for log_sum_next
+            self.log_sum = np.zeros(1)
+            max_val = np.amax(exp_sum)
             for i in range(self.const['num_samples']):
-                self.log_sum += math.exp(-1 * self.H[i][0] * self.params['B'] - self.H[i][1] * self.params['H'])
+                self.log_sum += np.exp(exp_sum[i] - max_val)
+            self.log_sum = max_val + np.log(self.log_sum)
+            print("self.log_sum:", self.log_sum)
 
             # compute U, I
             # U --> 2x1 matrix, I --> 2x2 matrix, trans(U)*inv(I)*U = 1x1 matrix
@@ -234,8 +253,7 @@ class Model1:
             self.U[0] = self.H_x[0] - self.H_mean[0]
             self.U[1] = self.H_x[1] - self.H_mean[1]
             self.I_inv = Util.compute_I_inverse(self.const['num_samples'], self.H, self.H_mean)
-            print("U: ", self.U)
-            print("I_inv: ", self.I_inv)
+
             # phi: (6), (7), (8)
             self.params['muL_prev'] = self.params['muL']
             self.params['sigmaL2_prev'] = self.params['sigmaL2']
@@ -337,19 +355,21 @@ class Model1:
         # eq(11) satisfaction condition
         while True:
             delta = np.matmul(self.I_inv, self.U)
-            print(delta)
+            #print(delta)
             self.params['B'] = self.params['B_prev'] + lambda_m * delta[0]
             self.params['H'] = self.params['H_prev'] + lambda_m * delta[1]
+            #print(self.params)
 
             # check for alternative criterion when delta_varphi is too small for armijo convergence
             # In practice, the Armijo condition (11) might not be satisfied
             # when the step length is too small
-            diff[0] = math.fabs(self.params['B'] - self.params['B_prev']) / (
-                        math.fabs(self.params['B_prev']) + self.const['eps1'])
-            diff[1] = math.fabs(self.params['H'] - self.params['H_prev']) / (
-                        math.fabs(self.params['H_prev']) + self.const['eps1'])
+            diff[0] = np.fabs(self.params['B'] - self.params['B_prev']) / (
+                        np.fabs(self.params['B_prev']) + self.const['eps1'])
+            diff[1] = np.fabs(self.params['H'] - self.params['H_prev']) / (
+                        np.fabs(self.params['H_prev']) + self.const['eps1'])
             max = np.amax(diff)
             if max < self.const['eps3']:
+                print("alternative condition")
                 break
 
             armijo = self.const['alpha'] * lambda_m * (np.matmul(np.transpose(self.U), np.matmul(self.I_inv, self.U)))
@@ -366,11 +386,12 @@ class Model1:
 
     def computeLogFactor(self):
         # Gibb's sampler to generate theta and theta_x
-        H_next = np.zeros((self.constant['num_samples'], 2))
+        H_next = np.zeros((self.const['num_samples'], 2))
         theta = self.init
         iteration = 0
         iter_burn = 0
-        log_sum_next = 0
+        log_sum_next = np.zeros(1)
+        exp_sum_next = np.zeros(self.const['num_samples'])
         while iteration < self.const['num_samples']:
             # do stuff
             for vx in range(Data.VOXEL_SIZE):
@@ -390,12 +411,18 @@ class Model1:
 
                             H_next[iteration][0] += theta[vx][vy][vk] * sum
                             H_next[iteration][1] += theta[vx][vy][vk]
+                exp_sum_next[iteration] = -1* H_next[iteration][0] * self.params['B'] - H_next[iteration][1] * self.params['H']
                 iteration += 1
         # compute log sum for varphi_next
+        max_val = np.amax(exp_sum_next)
         for i in range(self.const['num_samples']):
-            log_sum_next += math.exp(-1 * H_next[i][0] * self.params['B'] - H_next[i][1] * self.params['H'])
-
-        return math.log(log_sum_next / self.log_sum)
+        # CHANGE TO NP.EXP OR TORCH.EXP , MATH.exp has decimal point restrictions
+        # Re-structure the tensors such that the operations can be done in parallel 
+            log_sum_next += np.exp(exp_sum_next[i] - max_val)
+        log_sum_next = max_val + np.log(log_sum_next)
+        result = log_sum_next - self.log_sum
+        #print("result", result)
+        return result
 
     def converged(self):
         # we have 8 parameters
@@ -422,8 +449,6 @@ if __name__ == "__main__":
     #fdr.p_lis(gamma_1)
     #gamma = np.zeros((Data.VOXEL_SIZE, Data.VOXEL_SIZE, Data.VOXEL_SIZE))
     fdr = Model1("../data_15x15x15/x_val.txt")
-    #fdr.gem()
-    while(True):
-        print(bernoulli.rvs(0.4), bernoulli.rvs(0.6))
+    fdr.gem()
 
 

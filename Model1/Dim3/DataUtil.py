@@ -7,18 +7,18 @@ import matplotlib.pyplot as plt
 
 
 class Data:
-    VOXEL_SIZE = 15
-    SAVE_PATH = os.path.join(os.getcwd(), '../data_15x15x15/voxels')
-    GROUP0_PATH = os.path.join(os.getcwd(), '../data_15x15x15/voxels/0/')
-    GROUP1_PATH = os.path.join(os.getcwd(), '../data_15x15x15/voxels/1/')
-    ZIP_PATH = os.path.join(os.getcwd(), '../data_15x15x15/voxels.zip')
+    VOXEL_SIZE = 30
+    SAVE_PATH = os.path.join(os.getcwd(), '../data/voxels')
+    GROUP0_PATH = os.path.join(os.getcwd(), '../data/voxels/0/')
+    GROUP1_PATH = os.path.join(os.getcwd(), '../data/voxels/1/')
+    ZIP_PATH = os.path.join(os.getcwd(), '../data/voxels.zip')
 
     def __init__(self):
         self.v = np.empty((Data.VOXEL_SIZE, Data.VOXEL_SIZE, Data.VOXEL_SIZE))
         self.theta = np.empty((Data.VOXEL_SIZE, Data.VOXEL_SIZE, Data.VOXEL_SIZE))
 
     @staticmethod
-    def loadX(path):
+    def load(path):
         x = np.loadtxt(path).reshape((Data.VOXEL_SIZE, Data.VOXEL_SIZE, Data.VOXEL_SIZE))
         return x
 

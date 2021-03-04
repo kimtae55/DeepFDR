@@ -8,7 +8,7 @@ import torch
 import sys
 
 class Data:
-    VOXEL_SIZE = 30
+    VOXEL_SIZE = 15
 
     def __init__(self, rng_seed):
         self.v = np.empty((Data.VOXEL_SIZE, Data.VOXEL_SIZE, Data.VOXEL_SIZE))
@@ -42,11 +42,15 @@ class Data:
                 for i in range(Data.VOXEL_SIZE):
                     for j in range(Data.VOXEL_SIZE):
                         for k in range(Data.VOXEL_SIZE):
-                            sum = 0
-                            for l in range(L):
-                                sum = sum + p_l*np.random.normal(gn*mu_l,sigma_l**2)
-                            self.v[i][j][k] = (1-self.theta[i][j][k])*np.random.normal(mu,sigma) \
-                                              + self.theta[i][j][k]*sum
+                            mixture = 0.0
+                            prob = np.random.uniform(low = 0.0, high = 1.0)
+                            if prob < p_l[0]:
+                                mixture = np.random.normal(gn * mu_l[0], np.sqrt(sigma_l[0]))
+                            else:
+                                mixture = np.random.normal(gn * mu_l[1], np.sqrt(sigma_l[1]))
+
+                            self.v[i][j][k] = (1-self.theta[i][j][k])*np.random.normal(mu,np.sqrt(sigma)) \
+                                              + self.theta[i][j][k]*mixture
                 # save datum to correct folder
                 filename = 'k=' + str(gn) + '_j=' + str(sn) + '.txt'
                 savepath = os.path.join(directory, filename)
@@ -78,11 +82,11 @@ class Data:
 
         x = np.zeros((Data.VOXEL_SIZE, Data.VOXEL_SIZE, Data.VOXEL_SIZE))
         n0 = len(fnmatch.filter(os.listdir(self.GROUP0_PATH), '*.txt'))
-        n1 = len(fnmatch.filter(os.listdir(self.GROUP0_PATH), '*.txt'))
+        n1 = len(fnmatch.filter(os.listdir(self.GROUP1_PATH), '*.txt'))
         for i in range(Data.VOXEL_SIZE):
             for j in range(Data.VOXEL_SIZE):
                 for k in range(Data.VOXEL_SIZE):
-                    x[i][j][k] = ((1/n0)*v_0[i][j][k] - (1/n1)*v_1[i][j][k]) / (math.sqrt((1/n0)+(1/n1)))
+                    x[i][j][k] = ((1.0/n0)*v_0[i][j][k] - (1.0/n1)*v_1[i][j][k]) / (math.sqrt((1.0/n0)+(1.0/n1)))
 
         filename = '../data/' + str(rng_seed) + '/x_val.txt'
         savepath = os.path.join(os.getcwd(),filename)
@@ -102,7 +106,19 @@ if __name__ == "__main__":
     data = Data(rng_seed)
     theta_path = os.path.join(os.getcwd(), '../data/' + str(rng_seed) +'/label/label.pt')
     data.loadTheta(theta_path)
-    data.generate_v(p_l=0.5, mu_l=0.5, sigma_l=1, L=2, subjects=200, groups=2)
+    p_l = np.array([0.5,0.5])
+    mu_l = np.array([-2.0,2.0])
+    sigma_l = np.array([1.0,1.0])
+    L = 2
+    subjects = 200
+    groups = 2
+    print("Generating voxels...")
+    print("mu_l: ", mu_l)
+    print("p_l: ", p_l)
+    print("sigma_l: ", sigma_l)
+    data.generate_v(p_l=p_l, mu_l=mu_l, sigma_l=sigma_l, L=L, subjects=subjects, groups=groups)
+    # mu_1 = -2 mu_2 = 2
+    print("Generating Test Statistics...")
     data.generate_x(subjects=200)
 
 '''

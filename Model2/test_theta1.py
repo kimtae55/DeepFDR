@@ -5,7 +5,7 @@ import time
 import torch
 import numba
 from numba import cuda, float64, int32, guvectorize, vectorize, config
-from test_data1 import Data
+from test_data_cpu import Data
 import sys
 import h5py
 import math
@@ -27,7 +27,8 @@ class GibbsSampler:
         self.high = 1.0
         # PARAMETERS
         # np.array([B_0, B_1, B_1d, B_2d, B_3d, B_1r, B_2r, B_3r])
-        self.params = np.array([2.0, 0.0, -0.2, 0.4, -0.2, 0.0, 0.0, 0.0]).astype('float64') # ---> 30x30x30, ~0.2
+        # need to make numerator = -1.7346
+        self.params = np.array([8, 1e-3, -2e-1, 2.0, 6.0]).astype('float64') # ---> 30x30x30, ~0.2
         #self.params = np.array([1.2, -0.01, 0.001, 0.4e-5, 0.0, 0.0, 0.0, 0.0]).astype('float64') # ---> 15x15x15, ~0.2
         self.mat = np.zeros((3, Data.SIZE, Data.SIZE, Data.SIZE))
         for j_i in range(Data.SIZE):
@@ -91,6 +92,7 @@ class GibbsSampler:
         while iter_burn < burn_in:
             # do sequential sampling using numba jit
             label = gibbs_Sampler(Data.SIZE, self.params, label, self.mat)
+            print(label[0][0])
             probOverTime[iter_burn] = np.count_nonzero(label) / (Data.SIZE * Data.SIZE * Data.SIZE)
             print(str(iter_burn) + "_ratio: " +  str(probOverTime[iter_burn]))
             iter_burn += 1
@@ -135,14 +137,14 @@ def d_ij(x, y, z, i, j, k):
     # 4. theta_sum
     # 5. hj_theta_sum
     # test on gpu, see if it has speed improvement versus prange vs cpu vs parallel vs cuda
-    return (((z - k) ** 2 + (y - j) ** 2 + (x - i) ** 2)**float64(0.5))*1000.0
+    return (((z - k) ** 2 + (y - j) ** 2 + (x - i) ** 2)**float64(0.5))
 
 @vectorize([float64(float64)], target ='cpu')
 def rho_ij(dist):
     return float64(0.5)**dist
 
-@vectorize([float64(float64, float64, float64, float64, float64, float64, float64, float64)], target ='cpu')
-def theta_ij(dist, B_1, B_1d, B_2d, B_3d, B_1r, B_2r, B_3r):
+@vectorize([float64(float64, float64, float64, float64, float64)], target ='cpu')
+def theta_ij(dist, B_1, B_1d, B_2d, B_3d):
     #return (B_1 + B_3d * dist*dist*dist + B_3r * rho*rho*rho + B_2d * dist*dist + B_2r * rho*rho + B_1d * dist + B_1r * rho)
     return B_1 + B_3d / ((1.0+dist)*(1.0+dist)*(1.0+dist)) + B_2d / ((1.0+dist)*(1.0+dist)) + B_1d / (1.0+dist)
 
@@ -153,33 +155,26 @@ def hj_theta(t_ij, result):
 @numba.njit(cache = True, parallel=True)
 def gibbs_Sampler(voxel_size, params, label, mat):
     result = label
-    for i in range(voxel_size):
-        for j in range(voxel_size):
-            for k in range(voxel_size):
+    for i in numba.prange(voxel_size):
+        for j in numba.prange(voxel_size):
+            for k in numba.prange(voxel_size):
 
                 dist = d_ij(mat[0], mat[1], mat[2], float64(i), float64(j), float64(k))
                 #rho = rho_ij(dist)
-                t_ij = theta_ij(dist, params[1], params[2], params[3], params[4], params[5], params[6], params[7])
+                t_ij = theta_ij(dist, params[1], params[2], params[3], params[4])
 
                 theta_sum = np.sum(t_ij)
 
                 hj_t = hj_theta(t_ij, result)
 
                 hj_theta_sum = np.sum(hj_t)
+                #print((-theta_sum - params[0]) + hj_theta_sum)
 
                 numerator = np.exp((-theta_sum - params[0]) + hj_theta_sum)
-                #if k == 2 and j == 2:
-                #    print("result: ", result)
-                #    print("t_ij: ", t_ij)
-                #    print("theta_sum:", theta_sum)
-                #    print("hj_theta_sum:", hj_theta_sum)
-                #    print("numerator:", numerator)
 
                 p = numerator / (1 + numerator)
-                print(numerator, p)
-
-                if p < 0 or p > 1 or np.isnan(p):
-                    result[i][j][k] = np.random.binomial(1, 0.0)
+                if np.isnan(p): #because lim inf/1+inf ~ 1
+                    result[i][j][k] = np.random.binomial(1, 1.0)
                 else:
                     result[i][j][k] = np.random.binomial(1, p)
     return result
@@ -211,7 +206,7 @@ if __name__ == "__main__":
     np.random.seed(int(rng_seed))
     numba.set_num_threads(int(numba.config.NUMBA_NUM_THREADS/2))
     #cuda.select_device(0)
-    burn_in = 1000
+    burn_in = 100
     num_samples = 1
 
     print("NUM ITERATIONS: ", burn_in)

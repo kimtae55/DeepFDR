@@ -14,11 +14,5 @@ source venv/bin/activate
 pip install -r requirements.txt
 ```
 
-Run using conda:
-```
-conda env create -f environment.yml
-```
-
-
 
 

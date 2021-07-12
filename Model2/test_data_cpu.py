@@ -19,9 +19,17 @@ class Data:
         self.GROUP1_PATH = os.path.join(self.SAVE_PATH, '1')
         self.ZIP_PATH = os.path.join(self.SAVE_PATH, 'voxels.zip')
 
+    def loadNumpy(self,path):
+        self.theta = np.loadtxt(path).reshape((Data.SIZE, Data.SIZE, Data.SIZE))
+        return self.theta
+
     @staticmethod
-    def loadNumpy(path):
-        return torch.from_numpy(np.loadtxt(path).reshape((Data.SIZE, Data.SIZE, Data.SIZE)))
+    def saveAsNpy(array):
+        return np.save('label.npy', array)
+
+    @staticmethod
+    def loadNpy(path):
+        return np.load('label.npy').reshape((Data.SIZE, Data.SIZE, Data.SIZE))
 
     def loadTheta(self, path):
         self.theta = torch.load(path).cpu().numpy()
@@ -43,6 +51,7 @@ class Data:
                         for k in range(Data.SIZE):
                             mixture = 0.0
                             prob = np.random.uniform(low = 0.0, high = 1.0)
+
                             if prob < p_l[0]:
                                 mixture = np.random.normal(gn * mu_l[0], np.sqrt(sigma_l[0]))
                             else:
@@ -61,6 +70,14 @@ class Data:
                         outfile.write('# New z slice\n')
         # zip folder
         shutil.make_archive(self.SAVE_PATH, 'zip', self.SAVE_PATH)
+
+        filename = '../data/model2/' + str(rng_seed) + '/init_param.txt'
+        savepath = os.path.join(os.getcwd(),filename)
+        with open(savepath, 'w') as outfile:
+            outfile.write('# mu_l: {0}\n'.format(mu_l))
+            outfile.write('# sigma_l: {0}\n'.format(sigma_l))
+            outfile.write('# p_l: {0}\n'.format(p_l))
+
 
     def generate_x(self, subjects):
         # load data from zipped folder
@@ -100,14 +117,19 @@ class Data:
 
 if __name__ == "__main__":
     rng_seed = int(sys.argv[1])
+    mul_1 = float(sys.argv[2])
+    mul_2 = float(sys.argv[3])
+    sigma_1 = float(sys.argv[4])
+    sigma_2 = float(sys.argv[5])
+
     print("RAND: ", rng_seed)
     np.random.seed(rng_seed)
     data = Data(rng_seed)
     theta_path = os.path.join(os.getcwd(), '../data/model2/' + str(rng_seed) +'/label/label.txt')
     data.loadNumpy(theta_path)
     p_l = np.array([0.5,0.5])
-    mu_l = np.array([-1.0,3.0])
-    sigma_l = np.array([1.0,1.0])
+    mu_l = np.array([mul_1,mul_2])
+    sigma_l = np.array([sigma_1,sigma_2])
     L = 2
     subjects = 200
     groups = 2

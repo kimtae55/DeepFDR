@@ -8,10 +8,10 @@ import torch.nn as nn
 import torch.nn.functional as F
 import sys
 import numba
+import pandas as pd
 from numba import cuda, float32, int32, guvectorize, vectorize, config, float64
 from test_theta1 import gibbs_Sampler
 
-numba.config.THREADING_LAYER = 'threadsafe'
 DEBUG_MODE = True
 
 class Model2:
@@ -25,14 +25,13 @@ class Model2:
 
         # np.array([B_0, B_1, B_1d, B_2d, B_3d, B_1r, B_2r, B_3r])
         # put perturbations in the initial values
-        #varphi_tilde: tensor([-108000.0000, -182250.0000, 2100720.2854, -1626320.6761,-606719.8792])
 
         #H_0.5: tensor([-1.3500e+04, -1.8225e+08, -1.0504e+07, -8.1316e+05, -1.0112e+05])
-        self.params = torch.tensor([ 7.9926e+00,  9.9995e-04, -2.0000e-01,  2.0000e+00,  5.9998e+00])
-        # self.params = torch.tensor([8, 1e-3, -2e-1, 2.0, 6.0]) # groundtruth  for 0.11
-        self.params_prev = torch.tensor([ 7.9926e+00,  9.9995e-04, -2.0000e-01,  2.0000e+00,  5.9998e+00])
+        self.params = torch.tensor([-94.5000, -911.2500, -6302.1609, -6505.2827, -707.8399])
+        self.groundtruth_phi = torch.tensor([  -81.0000,  -729.0000, -5251.8007, -5692.1224,  -606.7199]) # groundtruth  for 0.11
+        self.params_prev = torch.tensor([-94.5000, -911.2500, -6302.1609, -6505.2827, -707.8399])
         self.pL = torch.tensor([0.5, 0.5])
-        self.muL = torch.tensor([-2.0, 2.0])
+        self.muL = torch.tensor([-1.0, 3.0])
         self.sigmaL2 = torch.tensor([1.0, 1.0])
         self.pL_prev = torch.zeros(2)
         self.muL_prev = torch.zeros(2)
@@ -60,16 +59,19 @@ class Model2:
                       'b': 2,
                       'delta': 1e-3,
                       'maxIter': 200,
-                      'eps1': 1e-3,
-                      'eps2': 1e-2,
-                      'eps3': 1e-3,
-                      'alpha': 1e-4,
-                      'burn_in': 100, # 1000
-                      'num_samples': 20, # 5000
+                      'eps1': 1.0,
+                      'eps2': 0.2,
+                      'eps3': 0.02,
+                      'eps4': 1e-3,
+                      'eps5': 1e-2,
+                      'alpha': 1e-3,
+                      'burn_in': 80, # 1000
+                      'num_samples': 30, # 5000
                       'L': 2,
                       'newton_max': 3,
                       'fdr_control': 0.1,
-                      'tiny': 1e-8
+                      'tiny': 1e-8,
+                      'lr': 1e-2
                       }
 
         self.x = torch.from_numpy(np.loadtxt(x_file).reshape((Data.SIZE,Data.SIZE,Data.SIZE)))
@@ -78,6 +80,8 @@ class Model2:
         self.H_x = torch.zeros(5)
         self.H_mean = torch.zeros(5)
         self.log_sum = torch.zeros(1)
+        self.log_sum_max_elem = torch.zeros(1)
+        self.exp_sum = torch.zeros(self.const['num_samples'])
         self.U = torch.zeros(5)
         self.I_inv = torch.zeros((5, 5))
         self.H_iter = torch.zeros((self.const['num_samples'], 5))
@@ -89,6 +93,7 @@ class Model2:
         self.theta = self.init
         self.H_reparam = torch.zeros(5)
         self.reparameterization_factor()
+        self.Q2 = torch.zeros(self.const['maxIter'])
 
         self.start = time.time()
         self.end = 0
@@ -105,36 +110,38 @@ class Model2:
         mu_0 = 0
         sigma0_sq = 1
         const_0 = 1 / torch.sqrt(torch.tensor([2 * torch.pi * sigma0_sq]))
-        ln_0 = torch.log(const_0 * torch.exp(-(torch.pow(self.x - mu_0, 2)) / (2 * sigma0_sq)))
+        ln_0 = const_0 * torch.exp(-(torch.pow(self.x - mu_0, 2)) / (2 * sigma0_sq))
 
         for t in range(self.const['maxIter']):
             print("")
             print("GEM iter: ", t)
-            print("params:  " + str(self.params) + " B_prev: " + str(self.params_prev))
+            print("params:  " + str(self.params))
+            print("params_prev: " + str(self.params_prev))
             print("pL:  " + str(self.pL) + " pL_prev: " + str(self.pL_prev))
             print("muL:  " + str(self.muL) + " muL_prev: " + str(self.muL_prev))
             print("sigmaL2:  " + str(self.sigmaL2) + " sigmaL2_prev: " + str(self.sigmaL2_prev))
-            print("varphi_tilde: ", self.params*self.H_reparam)
-            print("H_0.5: ", self.H_reparam)
+            print("groundtruth_phi: ", self.groundtruth_phi)
 
             # varphi: (10), (11)
-            self.params_prev = self.params
+            self.params_prev = self.params.clone()
+            self.muL_prev = self.muL.clone()
+            self.sigmaL2_prev = self.sigmaL2.clone()
+            self.pL_prev = self.pL.clone()
 
             # calculate hs(t)
             ln_1 = 0
             for l in range(self.const['L']):
                 ln_1 += ((self.pL[l]) / (torch.sqrt(2 * torch.pi * self.sigmaL2[l]))) * torch.exp(-(torch.pow(self.x - self.muL[l], 2)) / (2 * self.sigmaL2[l]))
-            ln_1 = torch.log(ln_1)
             # ----------------------------------------CHECKPOINT MARKER-------------------------------------------------------#
-
-            hs = -ln_0 + ln_1
-
             # Gibb's sampler to generate theta and theta_x
-            theta, self.H_mean, self.H_iter, exp_sum, g = self.gibb_sampler(self.const['burn_in'], self.const['num_samples'], torch.zeros(self.x.shape))
+            self.theta, self.H_mean, self.H_iter, self.exp_sum, g = self.gibb_sampler(self.const['burn_in'], self.const['num_samples'], torch.zeros(self.x.shape))
+            hs = torch.log(ln_1 / ln_0) 
+            print("hs: ", torch.amax(hs))
             theta_x, self.H_x, self.H_x_iter, exp_x_sum, self.gamma = self.gibb_sampler(self.const['burn_in'], self.const['num_samples'], hs)
 
-            if t == 5 and DEBUG_MODE:
-                import pdb; pdb.set_trace()
+            #if t == 4 and DEBUG_MODE:
+            #    import pdb; pdb.set_trace()
+            #    break
 
             #self.theta = theta
 
@@ -147,23 +154,16 @@ class Model2:
             # compute log factor for current varphi
             # Because np.exp can overflow with large value of exp_sum, a modification is made
             # where we subtract by max_val. Same is done for log_sum_next
-            self.log_sum = torch.zeros(1)
-            max_val = torch.amax(exp_sum)
-            self.log_sum = torch.sum(torch.exp(exp_sum - max_val))
-            self.log_sum = torch.log(self.log_sum) + max_val
-            print("log_sum(t): ", self.log_sum)
+            self.log_sum_max_elem = torch.amax(self.exp_sum)
             # compute U, I
             # U --> 5x1 matrix, I --> 5x5 matrix, trans(U)*inv(I)*U = 1x1 matrix
             self.U = self.H_x - self.H_mean
-            print("U: ", self.U*self.H_reparam)
+            print("H_tilde:", self.H_mean)
+            print("H_x_tilde: ", self.H_x)
             print("U(tilde): ", self.U)
             self.I_inv = self.compute_I_inverse(self.const['num_samples'], self.H_iter, self.H_mean)
             print("I_inv: ", self.I_inv)
             # phi: (6), (7), (8)
-
-            self.muL_prev = self.muL
-            self.sigmaL2_prev = self.sigmaL2
-            self.pL_prev = self.pL
 
             f_x = torch.zeros(self.x.shape)
             omega_sum = torch.zeros(self.const['L'])
@@ -186,7 +186,7 @@ class Model2:
                 self.pL[l] = (omega_sum[l]) / (gamma_sum)
                 
             # find varphi(t+1) that satisfies Armijo condition and compute Q2(t+1) - Q2(t)
-            self.computeArmijo()
+            self.computeArmijo(t, self.const['maxIter'])
             
             # check for parameter convergence (13) using phi and varphi
             if self.converged():
@@ -199,18 +199,21 @@ class Model2:
              
             self.end = time.time()
             print("time elapsed:", self.end - self.start)
+
+        Q2_np = self.Q2.cpu().numpy()
+        Q2_df = pd.DataFrame(Q2_np)
+        Q2_df.to_csv(self.SAVE_DIR + '/deltaQ2.csv')
         
         # Save B, H, mu, sigma, pl, gamma
         params_directory = os.path.join(self.SAVE_DIR, 'params.txt')
         with open(params_directory, 'w') as outfile:
             np.savetxt(outfile, self.params.cpu().numpy(), fmt='%-8.4f')
-            outfile.write('# New z slice\n')
+            outfile.write('# pL\n')
             np.savetxt(outfile, self.pL.cpu().numpy(), fmt='%-8.4f')
-            outfile.write('# New z slice\n')
+            outfile.write('# sigmaL2\n')
             np.savetxt(outfile, self.sigmaL2.cpu().numpy(), fmt='%-8.4f')
-            outfile.write('# New z slice\n')
+            outfile.write('# muL\n')
             np.savetxt(outfile, self.muL.cpu().numpy(), fmt='%-8.4f')
-            outfile.write('# New z slice\n')
 
         gamma_directory = os.path.join(self.SAVE_DIR, 'gamma.txt')
         with open(gamma_directory, 'w') as outfile:
@@ -218,67 +221,82 @@ class Model2:
                 np.savetxt(outfile, data_slice, fmt='%-8.4f')
                 outfile.write('# New z slice\n')
 
-    def computeArmijo(self):
-        lambda_m = 1
+        print("Q2(max_iter) - Q(0): ", torch.sum(self.Q2))
+        self.end = time.time()
+        print("time elapsed:", self.end - self.start)
+
+    def computeArmijo(self, epoch, max_epochs):
+        lambda_m = 1.0
         diff = torch.zeros(5)
         count = 0
         satisfied = False
-        # eq(11) satisfaction condition
+        # eq(11) satisfaction condition+
+
+        delta = torch.matmul(self.I_inv, self.U)
+        print("delta: ", delta)
         while count < 10:
-            delta = torch.matmul(self.I_inv, self.U)
-            self.params = self.params_prev + lambda_m * delta / self.H_reparam
+            self.params = self.params_prev + lambda_m * delta
+            print("est_params: ", self.params)
             # check for alternative criterion when delta_varphi is too small for armijo convergence
             # In practice, the Armijo condition (11) might not be satisfied
             # when the step length is too small
             diff = torch.abs(self.params - self.params_prev) / (torch.abs(self.params_prev) + self.const['eps1'])
-            max = torch.amax(diff)
-            if max < self.const['eps3']:
-                print("alternative condition")
+            max_val = torch.amax(diff)
+            if max_val < self.const['eps3']:
+                print("alternative condition: ", max_val)
                 self.params = self.params_prev
                 break
             
-            armijo = self.const['alpha'] * lambda_m * (torch.matmul(torch.transpose(self.U, 0, -1), torch.matmul(self.I_inv, self.U)))
             # use Gibbs sampler again to compute log_factor for delta_Q2 approximation
             log_factor = self.computeLogFactor()
 
-            deltaQ2 = torch.matmul((self.params - self.params_prev)*self.H_reparam, self.H_x) + log_factor
-            if deltaQ2 > 0:
-                print("Q2: INCREASING")
-            else:
-                print("Q2: *********************************")
-                count += 1
+            deltaQ2 = torch.matmul(self.params - self.params_prev, self.H_x) + log_factor
+            self.Q2[epoch] = deltaQ2
 
-            if deltaQ2 >= armijo:
+            print("deltaQ2: [" + str(deltaQ2) + "]")
+            if deltaQ2 > 0:
                 satisfied = True
                 break
             else:
-                lambda_m /= 2
-
-        #if not satisfied:
-            #self.params = self.params_prev
-
+                count += 1
+                lambda_m /= 5
         return
 
     def computeLogFactor(self):
+
         theta_next, H_next_mean, H_next_iter, exp_sum_next, g = self.gibb_sampler(self.const['burn_in'], self.const['num_samples'], torch.zeros(self.x.shape))
         # compute log sum for varphi_next
         max_val = torch.amax(exp_sum_next)
-        log_sum_next = torch.sum(torch.exp(exp_sum_next - max_val))
-        log_sum_next = torch.log(log_sum_next) + max_val
-        result = log_sum_next - self.log_sum
-        #print("result", result)
-        return result
+        max_val = (max_val + self.log_sum_max_elem)/2.0
+
+        diff_next = torch.sum(torch.exp(exp_sum_next - max_val))
+        diff_curr = torch.sum(torch.exp(self.exp_sum - max_val))
+
+        if not torch.isfinite(diff_next) or not torch.isfinite(diff_curr):
+            return 0.0
+
+        print("exp_sum_next - max_val: ", exp_sum_next - max_val)
+        print("self.exp_sum - max_val: ", self.exp_sum - max_val)
+        print("diff_next: ", diff_next)
+        print("diff_curr: ", diff_curr)
+
+        return torch.log(diff_next/diff_curr)
 
     def converged(self):
         # we have 8 parameters
         # B, H, pl[0], pl[1], mul[0], mul[1], sigmal[0], sigmal[1]
         diff_param = torch.abs(self.params - self.params_prev) / (torch.abs(self.params_prev) + self.const['eps1'])
-        diff_muL = torch.abs(self.muL - self.muL_prev) / (torch.abs(self.muL_prev) + self.const['eps1'])
-        diff_pL = torch.abs(self.pL - self.pL_prev) / (torch.abs(self.pL_prev) + self.const['eps1'])
-        diff_sigmaL = torch.abs(self.sigmaL2 - self.sigmaL2_prev) / (torch.abs(self.sigmaL2_prev) + self.const['eps1'])
+        diff_muL = torch.abs(self.muL - self.muL_prev) / (torch.abs(self.muL_prev) + self.const['eps4'])
+        diff_pL = torch.abs(self.pL - self.pL_prev) / (torch.abs(self.pL_prev) + self.const['eps4'])
+        diff_sigmaL = torch.abs(self.sigmaL2 - self.sigmaL2_prev) / (torch.abs(self.sigmaL2_prev) + self.const['eps4'])
         diff = torch.cat([diff_param, diff_muL, diff_sigmaL, diff_pL], dim=0)
-        max = torch.amax(diff)
-        if max < self.const['eps2']:
+        print("Diff_param: ", diff)
+
+        diff1 = torch.cat([diff_muL, diff_sigmaL, diff_pL], dim=0)
+
+        _max1 = torch.amax(diff_param)
+        _max2 = torch.amax(diff1)
+        if _max1 < self.const['eps2'] and _max2 < self.const['eps5']:
             return True
 
         return False
@@ -293,7 +311,7 @@ class Model2:
 
         iteration = 0
         iter_burn = 0
-        np_params = self.params.cpu().numpy().astype('float64')
+        np_params = (self.params / self.H_reparam).cpu().numpy().astype('float64')
         np_hs = hs.cpu().numpy().astype('float64')
         while iteration < n_samples:
             theta = torch.from_numpy(run(Data.SIZE, np_params, theta.cpu().numpy().astype('float64'), self.mat, np_hs))
@@ -306,32 +324,39 @@ class Model2:
                 H_iter[iteration][0] = -theta_sum
                 H_mean[0] += H_iter[iteration][0]
 
+                H_iter[iteration][1] = (-torch.sum(theta)*torch.sum(torch.ones((Data.SIZE,Data.SIZE,Data.SIZE))-theta))
+                H_mean[1] += H_iter[iteration][1]
+
                 h_i = torch.nonzero(theta).type(torch.DoubleTensor)
                 h_j = torch.nonzero(torch.ones((Data.SIZE,Data.SIZE,Data.SIZE))-theta).type(torch.DoubleTensor)
 
                 if h_i.shape[0] < 1 or h_j.shape[0] < 1:
-                    tmp = torch.zeros((Data.SIZE,Data.SIZE,Data.SIZE))
+                    print("...............H[iter] is 0")
+                    tmp = torch.tensor([0.0])
+                    H_iter[iteration][2] = tmp
+                    H_mean[2] += H_iter[iteration][2]
+
+                    H_iter[iteration][3] = tmp
+                    H_mean[3] += H_iter[iteration][3]
+
+                    H_iter[iteration][4] = tmp
+                    H_mean[4] += H_iter[iteration][4]
                 else:
                     tmp = torch.add(hi_dij(h_i, h_j), 1) # 1/(1+d_ij)
+                    H_iter[iteration][2] = (-torch.sum(tmp**(-1)))
+                    H_mean[2] += H_iter[iteration][2]
 
-                H_iter[iteration][1] = (-torch.sum(theta)*torch.sum(torch.ones((Data.SIZE,Data.SIZE,Data.SIZE))-theta))
-                H_mean[1] += H_iter[iteration][1]
+                    H_iter[iteration][3] = (-torch.sum(tmp**(-2)))
+                    H_mean[3] += H_iter[iteration][3]
 
-                # do later
-                H_iter[iteration][2] = (-torch.sum(tmp**(-1)))
-                H_mean[2] += H_iter[iteration][2]
+                    H_iter[iteration][4] = (-torch.sum(tmp**(-3)))
+                    H_mean[4] += H_iter[iteration][4]
 
-                H_iter[iteration][3] = (-torch.sum(tmp**(-2)))
-                H_mean[3] += H_iter[iteration][3]
-
-                H_iter[iteration][4] = (-torch.sum(tmp**(-3)))
-                H_mean[4] += H_iter[iteration][4]
-
+                H_mean /= self.H_reparam
+                H_iter[iteration] /= self.H_reparam
                 exp_sum[iteration] = -torch.sum(self.params*H_iter[iteration])
                 # divde H(0.5) after calculating exp_sum
 
-                H_iter[iteration] /= self.H_reparam
-                H_mean /= self.H_reparam
                 gamma += theta
 
                 iteration += 1
@@ -437,7 +462,7 @@ class Model2:
             fnr /= num_not_rejected
         
         # Save final signal_file
-        signal_directory = os.path.join(self.SAVE_DIR, 'signal.txt')
+        signal_directory = os.path.join(self.SAVE_DIR, 'lis.txt')
         with open(signal_directory, 'w') as outfile:
             outfile.write('fdr: ' + str(fdr) + '\n')
             outfile.write('fnr: ' + str(fnr) + '\n')
@@ -460,10 +485,6 @@ def d_ij(x, y, z, i, j, k):
     # test on gpu, see if it has speed improvement versus prange vs cpu vs parallel vs cuda
     return (((z - k) ** 2 + (y - j) ** 2 + (x - i) ** 2)**float64(0.5))
 
-@vectorize([float64(float64)], target ='cpu')
-def rho_ij(dist):
-    return float64(0.5)**dist
-
 @vectorize([float64(float64, float64, float64, float64, float64, float64, float64, float64)], target ='cpu')
 def theta_ij(dist, B_1, B_1d, B_2d, B_3d, B_1r, B_2r, B_3r):
     #return B_1 + B_3d / ((1.0+dist)*(1.0+dist)*(1.0+dist)) + B_2d / ((1.0+dist)*(1.0+dist)) + B_1d / (1.0+dist)
@@ -474,19 +495,18 @@ def hj_theta(t_ij, result):
     return t_ij * result
 
 #@numba.njit('Tuple((float64[:,:,:], float64[:,:,:,:]))(float64, float64[:], float64[:,:,:], float64[:,:,:,:], float64[:,:,:])',cache = True, parallel=True)
-@numba.njit(cache = True, parallel=True)
+@numba.njit(cache = True, parallel=True) # test out , nogil=True
 def run(voxel_size, params, label, mat, hs):
     result = label
     for i in numba.prange(voxel_size):
         for j in numba.prange(voxel_size):
             for k in numba.prange(voxel_size):
                 dist = d_ij(mat[0], mat[1], mat[2], float64(i), float64(j), float64(k))
-                #rho = rho_ij(dist)
                 t_ij = theta_ij(dist, params[1], params[2], params[3], params[4], params[5], params[6], params[7])
                 theta_sum = np.sum(t_ij)
                 hj_t = hj_theta(t_ij, result)
                 hj_theta_sum = np.sum(hj_t)
-                numerator = np.exp((-theta_sum - params[0] + hs[i][j][k]) + hj_theta_sum)
+                numerator = np.exp(-theta_sum - params[0] + hs[i][j][k] + hj_theta_sum)
 
                 p = numerator / (1 + numerator)
                 #print([-theta_sum,  hs[i][j][k], hj_theta_sum], i, j, k)
@@ -508,7 +528,7 @@ if __name__ == "__main__":
     print("RAND: ", rng_seed)
     torch.manual_seed(rng_seed)
     np.random.seed(int(rng_seed))
-
+    torch.set_default_dtype(torch.float64)
     numba.set_num_threads(int(numba.config.NUMBA_NUM_THREADS/2))
 
     fdr = Model2('../data/model2/' + str(rng_seed) +'/x_val.txt', rng_seed)

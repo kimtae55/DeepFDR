@@ -28,8 +28,8 @@ class GibbsSampler:
         # PARAMETERS
         # np.array([B_0, B_1, B_1d, B_2d, B_3d, B_1r, B_2r, B_3r])
         # need to make numerator = -1.7346
-        self.params = np.array([8, 1e-3, -2e-1, 2.0, 6.0]).astype('float64') # ---> 30x30x30, ~0.2
-        #self.params = np.array([1.2, -0.01, 0.001, 0.4e-5, 0.0, 0.0, 0.0, 0.0]).astype('float64') # ---> 15x15x15, ~0.2
+        self.params = np.array([6e-3, 4e-6, 5e-4, 7e-3, 6e-3]).astype('float64') # ---> 30x30x30, ~0.18
+
         self.mat = np.zeros((3, Data.SIZE, Data.SIZE, Data.SIZE))
         for j_i in range(Data.SIZE):
             for j_j in range(Data.SIZE):
@@ -108,6 +108,8 @@ class GibbsSampler:
             os.makedirs(self.SAVE_DIR)
         with open(self.LABEL_TXT_PATH, 'w') as outfile:
             outfile.write('# H = 1: {0}\n'.format(np.count_nonzero(label)))
+            outfile.write('# params: {0}\n'.format(self.params))
+
             for data_slice in label:
                 np.savetxt(outfile, data_slice, fmt='%-8.4f')
                 outfile.write('# New z slice\n')
@@ -155,9 +157,9 @@ def hj_theta(t_ij, result):
 @numba.njit(cache = True, parallel=True)
 def gibbs_Sampler(voxel_size, params, label, mat):
     result = label
-    for i in numba.prange(voxel_size):
-        for j in numba.prange(voxel_size):
-            for k in numba.prange(voxel_size):
+    for i in range(voxel_size):
+        for j in range(voxel_size):
+            for k in range(voxel_size):
 
                 dist = d_ij(mat[0], mat[1], mat[2], float64(i), float64(j), float64(k))
                 #rho = rho_ij(dist)
@@ -217,19 +219,57 @@ if __name__ == "__main__":
     sampler.run(burn_in, num_samples)
     end = time.time()
     print("time: ", end - start)
+'''
+    label_file = '../data/model2/' + str(rng_seed) +'/label/label.txt'
+    label = np.loadtxt(label_file).reshape((Data.SIZE,Data.SIZE,Data.SIZE))
+    np.save('../data/model2/' + str(rng_seed) +'/label/label.npy', label)
+    data = np.load('../data/model2/' + str(rng_seed) +'/label/label.npy')
 
 
-    '''
-    start = time.time()
-    data = np.empty((27000, 30,30,30))
-    with h5py.File(sampler.PRECOMPUTE_PATH, 'r') as f:
-        index = 0
-        for i in range(30):
-            for j in range(30):
-                for k in range(30):
-                    dist = f[str(i) + "_" + str(j) + "_" + str(k)]
-                    data[index] = np.array(dist)
-                    index = index + 1
-    end = time.time()
-    print("time: ", end - start)
-    '''
+    from matplotlib import pyplot as plot
+    from mpl_toolkits import mplot3d
+
+    plt.rcParams["figure.figsize"] = [7.00,3.50]
+    plt.rcParams["figure.autolayout"] = True
+    fig = plt.figure()
+    ax = fig.add_subplot(111,projection='3d')
+    z,x,y = data.nonzero()
+    ax.scatter3D(x,y,z, alpha=1, color="green")
+    plt.show()
+
+
+    init_prob = np.full((Data.SIZE, Data.SIZE, Data.SIZE), 0.5)
+    label = bernoulli(init_prob).astype('float64')
+    result = label
+
+    dist = d_ij(sampler.mat[0], sampler.mat[1], sampler.mat[2], float64(0), float64(0), float64(0))
+
+    print("dist: ", dist)
+    #rho = rho_ij(dist)
+    t_ij = theta_ij(dist, sampler.params[1], sampler.params[2], sampler.params[3], sampler.params[4])
+
+    print("t_ij: ", t_ij)
+
+    theta_sum = np.sum(t_ij)
+
+    print("theta_sum: ", theta_sum)
+
+
+    hj_t = hj_theta(t_ij, result)
+
+    print("hj_t: ", hj_t)
+
+    hj_theta_sum = np.sum(hj_t)
+
+    print("hj_theta_sum: ", hj_theta_sum)
+
+    #print((-theta_sum - params[0]) + hj_theta_sum)
+
+    numerator = np.exp((-theta_sum - sampler.params[0]) + hj_theta_sum)
+
+    p = numerator / (1 + numerator)
+    if np.isnan(p): #because lim inf/1+inf ~ 1
+        result[i][j][k] = np.random.binomial(1, 1.0)
+    else:
+        result[i][j][k] = np.random.binomial(1, p)
+'''

@@ -10,9 +10,6 @@ import sys
 import numba
 import pandas as pd
 from numba import cuda, float32, int32, guvectorize, vectorize, config, float64
-from test_theta1 import gibbs_Sampler
-
-DEBUG_MODE = True
 
 class Model2:
     def __init__(self, x_file, rng_seed):
@@ -21,39 +18,15 @@ class Model2:
         if not os.path.exists(self.SAVE_DIR):
             os.makedirs(self.SAVE_DIR)
 
-        self.KERNEL_PATH = os.path.join(os.getcwd(), 'kernel.txt')
-
-        # np.array([B_0, B_1, B_1d, B_2d, B_3d, B_1r, B_2r, B_3r])
-        # put perturbations in the initial values
-
-        #H_0.5: tensor([-1.3500e+04, -1.8225e+08, -1.0504e+07, -8.1316e+05, -1.0112e+05])
         self.params = torch.tensor([-94.5000, -911.2500, -6302.1609, -6505.2827, -707.8399])
         self.groundtruth_phi = torch.tensor([  -81.0000,  -729.0000, -5251.8007, -5692.1224,  -606.7199]) # groundtruth  for 0.11
         self.params_prev = torch.tensor([-94.5000, -911.2500, -6302.1609, -6505.2827, -707.8399])
         self.pL = torch.tensor([0.5, 0.5])
-        self.muL = torch.tensor([-1.0, 3.0])
+        self.muL = torch.tensor([-3.0, 2.0])
         self.sigmaL2 = torch.tensor([1.0, 1.0])
         self.pL_prev = torch.zeros(2)
         self.muL_prev = torch.zeros(2)
         self.sigmaL2_prev = torch.zeros(2)
-        #self.params = np.array([1.2, -0.01, 0.001, 0.4e-5, 0.0, 0.0, 0.0, 0.0]).astype('float64') # ---> 15x15x15, ~0.2
-
-        self.mat = np.zeros((3, Data.SIZE, Data.SIZE, Data.SIZE))
-        for j_i in range(Data.SIZE):
-            for j_j in range(Data.SIZE):
-                for j_k in range(Data.SIZE):
-                    self.mat[0, j_i, j_j, j_k] = j_i
-                    self.mat[1, j_i, j_j, j_k] = j_j
-                    self.mat[2, j_i, j_j, j_k] = j_k
-        self.mat = self.mat.astype('float64')
-
-        self.mat1 = torch.zeros((Data.SIZE * Data.SIZE * Data.SIZE, 3), dtype=torch.float64)
-        for j_i in range(Data.SIZE):
-            for j_j in range(Data.SIZE):
-                for j_k in range(Data.SIZE):
-                    self.mat1[j_i * Data.SIZE * Data.SIZE + Data.SIZE * j_j + j_k][0] = j_i
-                    self.mat1[j_i * Data.SIZE * Data.SIZE + Data.SIZE * j_j + j_k][1] = j_j
-                    self.mat1[j_i * Data.SIZE * Data.SIZE + Data.SIZE * j_j + j_k][2] = j_k
 
         self.const = {'a': 1,  # for penalized likelihood for L >= 2
                       'b': 2,
@@ -65,13 +38,11 @@ class Model2:
                       'eps4': 1e-3,
                       'eps5': 1e-2,
                       'alpha': 1e-3,
-                      'burn_in': 80, # 1000
-                      'num_samples': 30, # 5000
+                      'burn_in': 80, # 80
+                      'num_samples': 50, # 30
                       'L': 2,
                       'newton_max': 3,
                       'fdr_control': 0.1,
-                      'tiny': 1e-8,
-                      'lr': 1e-2
                       }
 
         self.x = torch.from_numpy(np.loadtxt(x_file).reshape((Data.SIZE,Data.SIZE,Data.SIZE)))
@@ -79,7 +50,6 @@ class Model2:
         self.init = torch.zeros(self.x.shape)  # initial theta value for gibb's sampling
         self.H_x = torch.zeros(5)
         self.H_mean = torch.zeros(5)
-        self.log_sum = torch.zeros(1)
         self.log_sum_max_elem = torch.zeros(1)
         self.exp_sum = torch.zeros(self.const['num_samples'])
         self.U = torch.zeros(5)
@@ -90,10 +60,12 @@ class Model2:
         torch.pi = torch.acos(torch.zeros(1)).item() * 2
         init_prob = torch.full((Data.SIZE, Data.SIZE, Data.SIZE), 0.5)
         self.init = torch.bernoulli(init_prob)  # p = 0.5 to choose 1
-        self.theta = self.init
         self.H_reparam = torch.zeros(5)
         self.reparameterization_factor()
         self.Q2 = torch.zeros(self.const['maxIter'])
+
+        self.t_ij = np.load(os.path.join(os.getcwd(), 't_ij.npy'))
+        self.theta_sum = np.load(os.path.join(os.getcwd(), 'theta_sum.npy'))
 
         self.start = time.time()
         self.end = 0
@@ -136,20 +108,14 @@ class Model2:
             # Gibb's sampler to generate theta and theta_x
             self.theta, self.H_mean, self.H_iter, self.exp_sum, g = self.gibb_sampler(self.const['burn_in'], self.const['num_samples'], torch.zeros(self.x.shape))
             hs = torch.log(ln_1 / ln_0) 
-            print("hs: ", torch.amax(hs))
             theta_x, self.H_x, self.H_x_iter, exp_x_sum, self.gamma = self.gibb_sampler(self.const['burn_in'], self.const['num_samples'], hs)
-
-            #if t == 4 and DEBUG_MODE:
-            #    import pdb; pdb.set_trace()
-            #    break
-
-            #self.theta = theta
 
             # Monte carlo averages
             self.H_mean /= self.const['num_samples']
             self.H_x /= self.const['num_samples']
             self.gamma /= self.const['num_samples']
             gamma_sum = torch.sum(self.gamma)
+            
             
             # compute log factor for current varphi
             # Because np.exp can overflow with large value of exp_sum, a modification is made
@@ -158,11 +124,7 @@ class Model2:
             # compute U, I
             # U --> 5x1 matrix, I --> 5x5 matrix, trans(U)*inv(I)*U = 1x1 matrix
             self.U = self.H_x - self.H_mean
-            print("H_tilde:", self.H_mean)
-            print("H_x_tilde: ", self.H_x)
-            print("U(tilde): ", self.U)
             self.I_inv = self.compute_I_inverse(self.const['num_samples'], self.H_iter, self.H_mean)
-            print("I_inv: ", self.I_inv)
             # phi: (6), (7), (8)
 
             f_x = torch.zeros(self.x.shape)
@@ -199,7 +161,7 @@ class Model2:
              
             self.end = time.time()
             print("time elapsed:", self.end - self.start)
-
+            
         Q2_np = self.Q2.cpu().numpy()
         Q2_df = pd.DataFrame(Q2_np)
         Q2_df.to_csv(self.SAVE_DIR + '/deltaQ2.csv')
@@ -214,6 +176,15 @@ class Model2:
             np.savetxt(outfile, self.sigmaL2.cpu().numpy(), fmt='%-8.4f')
             outfile.write('# muL\n')
             np.savetxt(outfile, self.muL.cpu().numpy(), fmt='%-8.4f')
+
+        print("Computing 1e5 samples for LIS")
+        # generate gamma using 10000 samples 
+        ln_1 = 0
+        for l in range(self.const['L']):
+            ln_1 += ((self.pL[l]) / (torch.sqrt(2 * torch.pi * self.sigmaL2[l]))) * torch.exp(-(torch.pow(self.x - self.muL[l], 2)) / (2 * self.sigmaL2[l]))
+        hs = torch.log(ln_1 / ln_0) 
+        self.gamma = self.gibb_sampler_nocomp(100, 10000, hs)
+        self.gamma /= 10000
 
         gamma_directory = os.path.join(self.SAVE_DIR, 'gamma.txt')
         with open(gamma_directory, 'w') as outfile:
@@ -303,21 +274,22 @@ class Model2:
         
     def gibb_sampler(self, burn_in, n_samples, hs):
         # initialize labels
-        H_iter = torch.zeros((self.const['num_samples'], 5))
+        H_iter = torch.zeros((n_samples, 5))
         H_mean = torch.zeros(5)
-        exp_sum = torch.zeros(self.const['num_samples'])
+        exp_sum = torch.zeros(n_samples)
         gamma = torch.zeros(self.x.shape)
-        theta = self.theta
+        theta = self.init.clone()
 
         iteration = 0
         iter_burn = 0
         np_params = (self.params / self.H_reparam).cpu().numpy().astype('float64')
         np_hs = hs.cpu().numpy().astype('float64')
         while iteration < n_samples:
-            theta = torch.from_numpy(run(Data.SIZE, np_params, theta.cpu().numpy().astype('float64'), self.mat, np_hs))
+            theta = torch.from_numpy(run(Data.SIZE, np_params, theta.cpu().numpy().astype('float64'), self.theta_sum, self.t_ij, np_hs))
             if iter_burn < burn_in:
                 iter_burn += 1
             else:
+                
                 theta_sum = torch.sum(theta)
 
                 # do later
@@ -356,11 +328,29 @@ class Model2:
                 H_iter[iteration] /= self.H_reparam
                 exp_sum[iteration] = -torch.sum(self.params*H_iter[iteration])
                 # divde H(0.5) after calculating exp_sum
-
+                
                 gamma += theta
 
                 iteration += 1
         return theta, H_mean, H_iter, exp_sum, gamma
+
+    def gibb_sampler_nocomp(self, burn_in, n_samples, hs):
+        # initialize labels
+        gamma = torch.zeros(self.x.shape)
+        theta = self.init.clone()
+
+        iteration = 0
+        iter_burn = 0
+        np_params = (self.params / self.H_reparam).cpu().numpy().astype('float64')
+        np_hs = hs.cpu().numpy().astype('float64')
+        while iteration < n_samples:
+            theta = torch.from_numpy(run(Data.SIZE, np_params, theta.cpu().numpy().astype('float64'), self.theta_sum, self.t_ij, np_hs))
+            if iter_burn < burn_in:
+                iter_burn += 1
+            else:
+                gamma += theta
+                iteration += 1
+        return gamma
 
     def compute_I_inverse(self, num_samples, H, H_mean):
         I = torch.matmul(torch.transpose(H-H_mean,0,-1), H-H_mean) / (num_samples - 1)
@@ -413,6 +403,7 @@ class Model2:
         k = 0
         for j in range(len(lis)):
             sum += lis[j]['value']
+            print(j, lis[j]['value'])
             if sum > (j+1)*self.const['fdr_control']:
                 k = j
                 break
@@ -472,44 +463,22 @@ class Model2:
                 outfile.write('# New z slice\n')
         return
 
-#======================================================================================================================#
-# 1000 burn_in 15x15x15: 120s (cpu, no-python, vectorize)
-@vectorize([float64(float64, float64, float64, float64, float64, float64)], target = 'cpu')
-def d_ij(x, y, z, i, j, k):
-    # create following guvectorize functions:
-    # 1. d_ij
-    # 2. rho_ij
-    # 3. theta_ij
-    # 4. theta_sum
-    # 5. hj_theta_sum
-    # test on gpu, see if it has speed improvement versus prange vs cpu vs parallel vs cuda
-    return (((z - k) ** 2 + (y - j) ** 2 + (x - i) ** 2)**float64(0.5))
-
-@vectorize([float64(float64, float64, float64, float64, float64, float64, float64, float64)], target ='cpu')
-def theta_ij(dist, B_1, B_1d, B_2d, B_3d, B_1r, B_2r, B_3r):
-    #return B_1 + B_3d / ((1.0+dist)*(1.0+dist)*(1.0+dist)) + B_2d / ((1.0+dist)*(1.0+dist)) + B_1d / (1.0+dist)
-    return B_1+ B_3d / ((1.0 + dist) * (1.0 + dist) * (1.0 + dist)) + B_2d / ((1.0 + dist) * (1.0 + dist)) + B_1d / (1.0 + dist)
-
 @vectorize([float64(float64, float64)], target ='cpu')
 def hj_theta(t_ij, result):
     return t_ij * result
 
 #@numba.njit('Tuple((float64[:,:,:], float64[:,:,:,:]))(float64, float64[:], float64[:,:,:], float64[:,:,:,:], float64[:,:,:])',cache = True, parallel=True)
-@numba.njit(cache = True, parallel=True) # test out , nogil=True
-def run(voxel_size, params, label, mat, hs):
+@numba.njit(cache = True, parallel=True)
+def run(voxel_size, params, label, theta_sum, t_ij, hs):
     result = label
     for i in numba.prange(voxel_size):
         for j in numba.prange(voxel_size):
             for k in numba.prange(voxel_size):
-                dist = d_ij(mat[0], mat[1], mat[2], float64(i), float64(j), float64(k))
-                t_ij = theta_ij(dist, params[1], params[2], params[3], params[4], params[5], params[6], params[7])
-                theta_sum = np.sum(t_ij)
-                hj_t = hj_theta(t_ij, result)
+                hj_t = hj_theta(t_ij[30*30*i + 30*j + k], result)
                 hj_theta_sum = np.sum(hj_t)
-                numerator = np.exp(-theta_sum - params[0] + hs[i][j][k] + hj_theta_sum)
+                numerator = np.exp((-theta_sum[i][j][k] - params[0] + hs[i][j][k] + hj_theta_sum))
 
                 p = numerator / (1 + numerator)
-                #print([-theta_sum,  hs[i][j][k], hj_theta_sum], i, j, k)
                 if np.isnan(p): #because lim inf/1+inf ~ 1
                     result[i][j][k] = np.random.binomial(1, 1.0)
                 else:
@@ -529,10 +498,9 @@ if __name__ == "__main__":
     torch.manual_seed(rng_seed)
     np.random.seed(int(rng_seed))
     torch.set_default_dtype(torch.float64)
-    numba.set_num_threads(int(numba.config.NUMBA_NUM_THREADS/2))
+    numba.set_num_threads(int(numba.config.NUMBA_NUM_THREADS))
 
     fdr = Model2('../data/model2/' + str(rng_seed) +'/x_val.txt', rng_seed)
-    print(fdr.H_reparam)
     fdr.gem()
     gamma_file = '../data/model2/' + str(rng_seed) +'/result' +'/gamma.txt'
     label_file = '../data/model2/' + str(rng_seed) +'/label/label.txt'

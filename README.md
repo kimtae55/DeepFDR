@@ -1,7 +1,6 @@
-## DeepFDR
-Proposed Model: Spatial FDR controlling approach based on Deep CNN
+# DeepFDR
 
-# Table of Contents
+## Table of Contents
 * [Overview](#overview)
 * [Installation](#requirements-and-installation)
 * [Example](#example)
@@ -16,14 +15,8 @@ graph - Short-/long-range and graph-based spatial dependencies
 
 DL - W-Net based self-supervised segmentation model
 
-Run using pip:
-```
-pip install venv
-source venv/bin/activate
-```
-
-# Overview
-# Installation
-# Example
+## Overview
+## Installation
+## Example
 
 

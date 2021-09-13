@@ -2,6 +2,7 @@
 Proposed Model: Spatial FDR controlling approach based on Deep CNN
 
 Folder Structure:
+
 sHMRF- Nearest-neighbor homogeneous HMRFs
 
 cHMRF - High-order-neighborhood non-homogeneous HMRFs

@@ -1,5 +1,10 @@
-# DeepFDR
+## DeepFDR
 Proposed Model: Spatial FDR controlling approach based on Deep CNN
+
+# Table of Contents
+* [Overview](#overview)
+* [Installation](#requirements-and-installation)
+* [Example](#example)
 
 Folder Structure:
 
@@ -17,5 +22,8 @@ pip install venv
 source venv/bin/activate
 ```
 
+# Overview
+# Installation
+# Example
 
 

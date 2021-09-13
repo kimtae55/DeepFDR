@@ -5,7 +5,7 @@ import time
 import torch
 import numba
 from numba import cuda, float64, int32, guvectorize, vectorize, config
-from test_data_cpu import Data
+from test_statistic import Data
 import sys
 import math
 

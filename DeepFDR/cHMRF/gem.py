@@ -1,6 +1,6 @@
 import numpy as np
 import os
-from test_data_cpu import Data
+from test_statistic import Data
 import math
 import time
 import torch

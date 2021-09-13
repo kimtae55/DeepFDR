@@ -2,12 +2,9 @@
 Proposed Model: Spatial FDR controlling approach based on Deep CNN
 
 Folder Structure:
-Model 1 - Nearest-neighbor homogeneous HMRFs
-
-Model 2 - High-order-neighborhood non-homogeneous HMRFs
-
-Model 3 - Short-/long-range and graph-based spatial dependencies
-
+sHMRF- Nearest-neighbor homogeneous HMRFs
+cHMRF - High-order-neighborhood non-homogeneous HMRFs
+graph - Short-/long-range and graph-based spatial dependencies
 DL - W-Net based self-supervised segmentation model
 
 Run using pip:

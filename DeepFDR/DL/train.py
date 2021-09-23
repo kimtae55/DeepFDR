@@ -96,7 +96,6 @@ def single_training(config):
 # https://github.com/yangkky/distributed_tutorial/blob/master/src/mnist-distributed.py
 
 # multi-node multi-gpu: https://leimao.github.io/blog/PyTorch-Distributed-Training/
-# kill gpus: https://leimao.github.io/blog/Kill-PyTorch-Distributed-Training-Processes/
 def multi_training(args, config):
     torch.cuda.set_device(args.local_rank)
     dist.init_process_group(backend='nccl', init_method='env://')
@@ -118,7 +117,8 @@ def multi_training(args, config):
                               drop_last=True, num_workers=config.loadThread, pin_memory=True)
 
     # https://pytorch.org/docs/stable/generated/torch.optim.Adam.html#torch.optim.Adam
-    criterion = nn.MSELoss().cuda(args.local_rank)
+    criterion0 = nn.BCELoss().cuda(args.local_rank)
+    criterion1 = nn.MSELoss().cuda(args.local_rank)
     optimizer = torch.optim.Adam(net.parameters(), lr=1e-3, weight_decay=1e-5, amsgrad=True)
     lr_scheduler = torch.optim.lr_scheduler.ExponentialLR(optimizer, gamma=0.9)
     gaussian = normal.Normal(0.0, 1.0)
@@ -145,10 +145,13 @@ def multi_training(args, config):
         for batch_idx, data in enumerate(trainLoader):  
             # get the inputs; data is a list of [inputs, labels]
             inputs, labels = data
+            labels = float(1.0) - labels
+
             # zero pad input and label by 1 on each side to make it 32x32x32
             p3d = (1, 1, 1, 1, 1, 1)
             inputs = F.pad(inputs, p3d, "constant", 0)
             labels = F.pad(labels, p3d, "constant", 0)
+ 
             # add dimension to match conv3d weights
             inputs = inputs.unsqueeze(1)
             labels = labels.unsqueeze(1)
@@ -162,12 +165,12 @@ def multi_training(args, config):
             # forward + backward + optimize
             enc = net(inputs, returns='enc')
             #define loss function here
-            enc_loss=criterion(enc, labels) # should i sigmoid here? 
+            enc_loss=criterion1(enc, labels)  
             enc_loss.backward()
             optimizer.step()
             optimizer.zero_grad()
             dec = net(inputs, returns='dec')
-            rec_loss=criterion(dec, gaussian.cdf(inputs))
+            rec_loss=criterion1(dec, gaussian.cdf(inputs))
             rec_loss.backward()
             optimizer.step()
 
@@ -182,6 +185,8 @@ def multi_training(args, config):
             for batch_idx, data in enumerate(testLoader):
                 # get the inputs; data is a list of [inputs, labels]
                 inputs, labels = data
+                labels = float(1.0) - labels
+
                 # zero pad input and label by 1 on each side to make it 32x32x32
                 p3d = (1, 1, 1, 1, 1, 1)
                 inputs = F.pad(inputs, p3d, "constant", 0)
@@ -195,8 +200,8 @@ def multi_training(args, config):
                 labels = labels.cuda(args.local_rank)  
 
                 enc, dec = net(inputs)
-                enc_loss=criterion(enc, labels)
-                rec_loss=criterion(dec, gaussian.cdf(inputs))
+                enc_loss=criterion1(enc, labels)
+                rec_loss=criterion1(dec, gaussian.cdf(inputs))
 
                 test_loss_enc += enc_loss.item()
                 test_loss_dec += rec_loss.item()
@@ -216,15 +221,15 @@ def multi_training(args, config):
             print("#%d: epoch_time: %8.2f, ~time_left: %8.2f" % (epoch, end_time-start_time, (end_time-start_time)*(config.epochs - epoch)))
 
             # Early stop
-            #if earlyStop(test_loss_enc):
-            #    print("Early stop activated.")
-            #    break
+            if earlyStop(test_loss_enc):
+                print("Early stop activated.")
+                break
 
         lr_scheduler.step()
 
     if args.local_rank == 0:
         # save trained model
-        torch.save(net.module.state_dict(), config.savepath)
+        torch.save(net.state_dict(), config.savepath)
         # plot loss
         timex = np.arange(0, config.epochs, 1)
         plt.plot(timex, trainLossEnc_plot, color='r', label='train_e')

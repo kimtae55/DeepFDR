@@ -20,7 +20,6 @@ class Block(nn.Module):
             self.depth2=nn.Conv3d(out_filters, out_filters, kernel_size=1)
 
             self.conv2=lambda x: self.depth2(self.spatial2(x))
-
         else:
             self.conv1=nn.Conv3d(in_filters, out_filters, kernel_size=3, padding=1)
             self.conv2=nn.Conv3d(out_filters, out_filters, kernel_size=3, padding=1)
@@ -29,11 +28,13 @@ class Block(nn.Module):
         self.batchnorm1=nn.BatchNorm3d(out_filters)
         self.batchnorm2=nn.BatchNorm3d(out_filters)
 
-    def forward(self, x):
-
-        x=self.batchnorm1(self.relu(self.conv1(x))).clamp(0)
-        x=self.batchnorm2(self.relu(self.conv2(x))).clamp(0)
-
+    def forward(self, x, lastLayer=False):
+        if lastLayer:
+            x=self.batchnorm1(self.conv1(x)).clamp(0)
+            x=self.batchnorm2(self.conv2(x)).clamp(0)
+        else:
+            x=self.batchnorm1(self.relu(self.conv1(x))).clamp(0)
+            x=self.batchnorm2(self.relu(self.conv2(x))).clamp(0)
         return x
 
 class UEnc(nn.Module):
@@ -65,7 +66,7 @@ class UEnc(nn.Module):
         enc3=self.enc3(F.max_pool3d(enc2, (2,2,2)))
 
         enc4=self.enc4(F.max_pool3d(enc3, (2,2,2)))
-        middle=self.middle(F.max_pool3d(enc4, (2,2,2)))
+        middle=self.middle(F.max_pool3d(enc4, (2,2,2)), lastLayer=True)
 
         up1=torch.cat((enc4, self.up1(middle)), 1)
         dec1=self.dec1(up1)
@@ -116,7 +117,7 @@ class UDec(nn.Module):
         enc4 = self.enc4(F.max_pool3d(enc3, (2,2,2)))
 
 
-        middle = self.middle(F.max_pool3d(enc4, (2,2,2)))
+        middle = self.middle(F.max_pool3d(enc4, (2,2,2)), lastLayer=True)
 
 
         up1 = torch.cat((enc4, self.up1(middle)), 1)
@@ -146,13 +147,13 @@ class WNet(nn.Module):
     def forward(self, x, returns='both'):
         # change logic in here
 
-        enc = self.UEnc(x)
+        enc = torch.sigmoid(self.UEnc(x))
 
         if returns=='enc':
-            return enc
+            return enc 
 
         #dec=self.UDec(F.softmax(enc, 1))
-        dec = self.UDec(torch.sigmoid(enc))
+        dec = torch.sigmoid(self.UDec(enc))
 
         if returns=='dec':
             return dec

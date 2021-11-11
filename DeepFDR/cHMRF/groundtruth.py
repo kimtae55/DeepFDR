@@ -39,7 +39,6 @@ class GibbsSampler:
             # do sequential sampling using numba jit
             label = precompute_sampler(Data.SIZE, self.params, label, self.t_ij, self.theta_sum)
             if iter_burn < burn_in:
-                print(label[0][0])
                 probOverTime[iter_burn] = np.count_nonzero(label) / (Data.SIZE * Data.SIZE * Data.SIZE)
                 print(str(iter_burn) + "_ratio: " +  str(probOverTime[iter_burn]))
                 iter_burn += 1

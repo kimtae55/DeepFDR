@@ -19,49 +19,27 @@ class Data:
         self.GROUP1_PATH = os.path.join(self.SAVE_PATH, '1')
         self.ZIP_PATH = os.path.join(self.SAVE_PATH, 'voxels.zip')
 
-    def loadNumpy(self,path):
+    def loadTheta(self,path):
         self.theta = np.loadtxt(path).reshape((Data.SIZE, Data.SIZE, Data.SIZE))
         return self.theta
 
-    @staticmethod
-    def saveAsNpy(array):
-        return np.save('label.npy', array)
-
-    @staticmethod
-    def loadNpy(path):
-        return np.load('label.npy').reshape((Data.SIZE, Data.SIZE, Data.SIZE))
-
-    def loadTheta(self, path):
-        self.theta = torch.load(path).cpu().numpy()
- 
-    def generate_x(self,  p_l, mu_l, sigma_l, L, subjects, groups):
+    def generate_x_directly(self, p_l, mu_l, sigma_l, L, subjects, groups):
         mu, sigma = 0, 1
-        v_0 = np.zeros((Data.SIZE, Data.SIZE, Data.SIZE))
-        v_1 = np.zeros((Data.SIZE, Data.SIZE, Data.SIZE))
+        x = np.zeros((Data.SIZE, Data.SIZE, Data.SIZE))
+
         for i in range(Data.SIZE):
             for j in range(Data.SIZE):
                 for k in range(Data.SIZE):
                     if self.theta[i][j][k]:
                         bern = np.random.binomial(1, p_l[1])
-                        for sn in range(subjects):
-                            if bern:
-                                v_0[i][j][k] += np.random.normal(mu,np.sqrt(sigma))
-                                v_1[i][j][k] += np.random.normal(mu_l[1] *  (math.sqrt((1.0/subjects)+(1.0/subjects))), np.sqrt(sigma_l[1]))
-                            else:
-                                v_0[i][j][k] += np.random.normal(mu,np.sqrt(sigma))
-                                v_1[i][j][k] += np.random.normal(mu_l[0] *  (math.sqrt((1.0/subjects)+(1.0/subjects))), np.sqrt(sigma_l[0]))
+                        if bern:
+                            x[i][j][k] += np.random.normal(mu_l[1], np.sqrt(sigma_l[1]))
+                        else:
+                            x[i][j][k] += np.random.normal(mu_l[0], np.sqrt(sigma_l[0]))
                     else:
-                        for sn in range(subjects):
-                            v_0[i][j][k] += np.random.normal(mu,np.sqrt(sigma))
-                            v_1[i][j][k] += np.random.normal(mu,np.sqrt(sigma))
+                        x[i][j][k] += np.random.normal(mu,np.sqrt(sigma))
 
-        x = np.zeros((Data.SIZE, Data.SIZE, Data.SIZE))
-        for i in range(Data.SIZE):
-            for j in range(Data.SIZE):
-                for k in range(Data.SIZE):
-                    x[i][j][k] = ((1.0/subjects)*v_0[i][j][k] - (1.0/subjects)*v_1[i][j][k]) / (math.sqrt((1.0/subjects)+(1.0/subjects)))
-
-        filename = '../data/model2/' + str(rng_seed) + '/x_val.txt'
+        filename = '../data/model2/' + str(rng_seed) + '/x.txt'
         savepath = os.path.join(os.getcwd(),filename)
         with open(savepath, 'w') as outfile:
             outfile.write('# Array shape: {0}\n'.format(x.shape))
@@ -71,25 +49,30 @@ class Data:
                 outfile.write('# New z slice\n')
 
 if __name__ == "__main__":
-    rng_seed = int(sys.argv[1])
-    mul_1 = float(sys.argv[2])
-    mul_2 = float(sys.argv[3])
-    sigma_1 = float(sys.argv[4])
-    sigma_2 = float(sys.argv[5])
+    parser = argparse.ArgumentParser(description='Test_Statistics Generation')
+    parser.add_argument('--seed', type=int)
+    parser.add_argument('--p_0', default = 0.5, type=float)
+    parser.add_argument('--p_1', default = 0.5, type=float)
+    parser.add_argument('--mu_0', default = -2.0, type=float)
+    parser.add_argument('--mu_1', default = 2.0, type=float)
+    parser.add_argument('--sig_0', default = 1.0, type=float)
+    parser.add_argument('--sig_1', default = 1.0, type=float)  
+    parser.add_argument('--groups', default=2, type=int)
+    parser.add_argument('--subjects', default=200, type=int)
+    args = parser.parse_args()
 
-    print("RAND: ", rng_seed)
-    np.random.seed(rng_seed)
-    data = Data(rng_seed)
-    theta_path = os.path.join(os.getcwd(), '../data/model2/' + str(rng_seed) +'/label/label.txt')
-    data.loadNumpy(theta_path)
-    p_l = np.array([0.5,0.5])
-    mu_l = np.array([mul_1,mul_2])
-    sigma_l = np.array([sigma_1,sigma_2])
-    L = 2
-    subjects = 200
-    groups = 2
+    np.random.seed(args.seed)
+    data = Data(args.seed)
+    data.loadTheta('../data/model2/' + str(rng_seed) + '/label/label.txt')
+    p_l = np.array([args.p_0,args.p_1])
+    mu_l = np.array([args.mu_0,args.mu_1])
+    sigma_l = np.array([args.sig_0,args.sig_1])
+    subjects = args.subjects
+    groups = args.groups
+    sample_size = args.sample_size
     print("mu_l: ", mu_l)
     print("p_l: ", p_l)
     print("sigma_l: ", sigma_l)
     print("Generating Test Statistics...")
-    data.generate_x(p_l=p_l, mu_l=mu_l, sigma_l=sigma_l, L=L, subjects=subjects, groups=groups)
+
+    data.generate_x_directly(p_l=p_l, mu_l=mu_l, sigma_l=sigma_l, L=L, subjects=subjects, groups=groups)

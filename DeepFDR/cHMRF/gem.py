@@ -467,7 +467,6 @@ class Model2:
 def hj_theta(t_ij, result):
     return t_ij * result
 
-#@numba.njit('Tuple((float64[:,:,:], float64[:,:,:,:]))(float64, float64[:], float64[:,:,:], float64[:,:,:,:], float64[:,:,:])',cache = True, parallel=True)
 @numba.njit(cache = True, parallel=True)
 def run(voxel_size, params, label, theta_sum, t_ij, hs):
     result = label
@@ -491,16 +490,18 @@ def hi_dij(A, B):
     sqrB = torch.sum(torch.pow(B, 2), 1, keepdim=True).expand(B.shape[0], A.shape[0]).t()
     return torch.sqrt(sqrA - 2 * torch.mm(A, B.t()) + sqrB)
 
-
 if __name__ == "__main__":
-    rng_seed = sys.argv[1]
-    print("RAND: ", rng_seed)
+    parser = argparse.ArgumentParser(description='Test_Statistics Generation')
+    parser.add_argument('--seed', type=int)
+    args = parser.parse_args()
+
+    rng_seed = args.seed
     torch.manual_seed(rng_seed)
     np.random.seed(int(rng_seed))
     torch.set_default_dtype(torch.float64)
     numba.set_num_threads(int(numba.config.NUMBA_NUM_THREADS))
 
-    fdr = Model2('../data/model2/' + str(rng_seed) +'/x_val.txt', rng_seed)
+    fdr = Model2('../data/model2/' + str(rng_seed) +'/x.txt', rng_seed)
     fdr.gem()
     gamma_file = '../data/model2/' + str(rng_seed) +'/result' +'/gamma.txt'
     label_file = '../data/model2/' + str(rng_seed) +'/label/label.txt'

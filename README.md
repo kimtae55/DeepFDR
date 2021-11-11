@@ -18,6 +18,10 @@ DL - W-Net based self-supervised segmentation model
 ## Overview
 ## Installation
 There are some files > 5GB, so please download the code using Dropbox link: [DeepFDR](https://www.dropbox.com/sh/9378gmgy8fb97r9/AABRmGsDHwtiNXH_W55w-igna?dl=0)
+Download Dependencies: ```pip install -r requirements.txt```
 ## Example
-
+Running cHMRF:
+1) Generate groundtruth label ```python groundtruth.py rng_seed``` (Specify an integer for the rng_seed, use the same seed for below steps)
+2) Generate test statistics 'x' ```python test_statistic.py --seed rng_seed --p_0 0.5 --p_1 0.5 --mu_0 -2.0 --mu_1 2.0 --sig_0 1.0 --sig_1 1.0```
+3) Run gem and compute lis ```python gem.py --seed rng_seed```
 

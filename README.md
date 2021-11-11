@@ -17,8 +17,10 @@ DL - W-Net based self-supervised segmentation model
 
 ## Overview
 ## Installation
-The project uses ```Python 3.8```
+The project uses ```Python 3.8```.
+
 There are some files > 5GB, so please download the code using Dropbox link: [DeepFDR](https://www.dropbox.com/sh/9378gmgy8fb97r9/AABRmGsDHwtiNXH_W55w-igna?dl=0)
+
 Download Dependencies: ```pip install -r requirements.txt```
 ## Example
 Running cHMRF:

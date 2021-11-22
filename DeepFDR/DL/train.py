@@ -14,53 +14,75 @@ import time
 import matplotlib.pyplot as plt
 import torch.distributed as dist
 import torch.utils.data as Data
+from torchinfo import summary
 
 def main():
     parser = argparse.ArgumentParser(description='DeepFDR using W-NET')
     parser.add_argument('--local_rank', type=int)
-    parser.add_argument('--num_gpu', type=int)
+    parser.add_argument('--num_gpu', default=1, type=int)
+    parser.add_argument('--k_folds', default=6, type=int)
+    parser.add_argument('--lr', default=1e-3, type=float)
+    parser.add_argument('--momentum', default=0.9, type=float)
+    parser.add_argument('--datapath', type=str)
     args = parser.parse_args()
 
     config = Config()
 
     np.random.seed(config.seed)
     torch.manual_seed(config.seed)
+    torch.cuda.manual_seed_all(config.seed)
+    #torch.backends.cudnn.benchmark = False
+    #torch.backends.cudnn.deterministic = True
 
     if args.num_gpu > 1:
         # handle multiple machine/multiple gpu training
         multi_training(args, config)
     else:
         # handle cpu & single gpu training
-        single_training(config)
+        single_training(args, config)
 
-def single_training(config):
+def weights_init(m):
+    classname = m.__class__.__name__
+    if classname.find('Conv') != -1:
+        nn.init.kaiming_normal_(m.weight, mode='fan_out', nonlinearity='relu')
+    elif classname.find('BatchNorm') != -1:
+        nn.init.constant_(m.weight, 1)
+        nn.init.constant_(m.bias, 0)
+
+def single_training(args, config):
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
     trainLossEnc_plot = np.zeros(config.epochs)
     trainLossDec_plot = np.zeros(config.epochs)
     testLossEnc_plot = np.zeros(config.epochs)
     testLossDec_plot = np.zeros(config.epochs)
-    earlyStop = EarlyStop(patience=config.patience, threshold=config.threshold)
 
-    trainset = DataLoader("train", config)
-    trainloader = Data.DataLoader(trainset.dataset, batch_size = self.config.batch_size, shuffle = self.config.shuffle, num_workers = self.config.loadThread, pin_memory = True)
-    testset = DataLoader("test", config)
-    testloader = Data.DataLoader(testset.dataset, batch_size = self.config.batch_size, shuffle = self.config.shuffle, num_workers = self.config.loadThread, pin_memory = True)
+    trainset = DataLoader("train", config, args)
+    trainloader = Data.DataLoader(trainset.dataset, batch_size = config.batch_size, shuffle = config.shuffle, num_workers = config.loadThread, pin_memory = True)
+    testset = DataLoader("test", config, args)
+    testloader = Data.DataLoader(testset.dataset, batch_size = config.batch_size, shuffle = config.shuffle, num_workers = config.loadThread, pin_memory = True)
 
     global net
     net=WNet(config.num_classes)
+    net.apply(weights_init)
+    summary(net)
+
     if torch.cuda.is_available():
         net=net.cuda()
 
     global criterion, gaussian
     criterion = nn.MSELoss()
-    optimizer = optim.SGD(net.parameters(), lr=0.001, momentum=0.9)
+    #optimizer = torch.optim.Adam(net.parameters(), lr=args.lr, amsgrad=True)
+    optimizer = torch.optim.SGD(net.parameters(), lr=args.lr, momentum=args.momentum)
+    lr_scheduler = torch.optim.lr_scheduler.ExponentialLR(optimizer, gamma=0.9)
     gaussian = normal.Normal(0.0, 1.0)
 
     for epoch in range(config.epochs):  # loop over the dataset multiple times
         start_time = time.time()
         train_loss_enc, train_loss_dec = train_epoch(trainloader, optimizer)
         test_loss_enc, test_loss_dec = test_epoch(testloader, optimizer)
+        lr_scheduler.step()
+
         end_time = time.time()
 
         # print statistics
@@ -69,25 +91,27 @@ def single_training(config):
         testLossEnc_plot[epoch] = test_loss_enc
         testLossDec_plot[epoch] = test_loss_dec
         print("train_l_e: %5.3f, train_l_d: %5.3f ------ test_l_e: %5.3f, test_l_d: %5.3f" % (train_loss_enc, train_loss_dec, test_loss_enc, test_loss_dec))
-        print("epoch_time: %8.2f, ~time_left: %8.2f" % (end_time-start_time, (end_time-start_time)*(config.epochs - epoch)))
-
-        # Early stop
-        if earlyStop(test_loss_enc):
-            print("Early stop activated.")
-            break
+        print("#%d: epoch_time: %8.2f, ~time_left: %8.2f" % (epoch, end_time-start_time, (end_time-start_time)*(config.epochs - epoch)))
 
     # save trained model
-    torch.save(net.state_dict(), config.savepath)
+    # save under datapath + /result/sgd/model_name.pth
+    model_name = 'lr_' + str(args.lr) + '.pth'
+    loss_name = 'lr_' + str(args.lr) + '.png'
+    savepath = os.path.join(args.datapath, 'result', 'sgd')
+    if not os.path.exists(savepath):
+        os.makedirs(savepath)
+
+    torch.save(net.state_dict(), os.path.join(savepath, model_name))
     # plot loss
-    timex = np.arange(0, config.epochs, 1)
-    plt.plot(timex, trainLossEnc_plot, color='r', label='train_e')
-    plt.plot(timex, trainLossDec_plot, color='m', label='train_d')
-    plt.plot(timex, testLossEnc_plot, color='b', label='test_e')
-    plt.plot(timex, testLossDec_plot, color='c', label='test_d')
+    timex = np.arange(0, epoch+1, 1)
+    plt.plot(timex, trainLossEnc_plot[0:epoch+1], color='r', label='train_e')
+    plt.plot(timex, trainLossDec_plot[0:epoch+1], color='m', label='train_d')
+    plt.plot(timex, testLossEnc_plot[0:epoch+1], color='b', label='test_e')
+    plt.plot(timex, testLossDec_plot[0:epoch+1], color='c', label='test_d')
     plt.xlabel("epoch")
     plt.ylabel("loss")
     plt.legend()
-    plt.savefig(config.savepath_loss)
+    plt.savefig(os.path.join(savepath, loss_name))
 
     print('Finished Training')
 
@@ -104,14 +128,14 @@ def multi_training(args, config):
     net = WNet(config.num_classes)
     net.cuda(args.local_rank)
     net = nn.parallel.DistributedDataParallel(net, device_ids=[args.local_rank], output_device=args.local_rank, find_unused_parameters=True)
-    net.train()
+    net.apply(weights_init)
 
-    trainSet = DataLoader("train", config)
+    trainSet = DataLoader("train", config, args)
+    testSet = DataLoader("test", config, args)
     trainSampler = torch.utils.data.distributed.DistributedSampler(trainSet.dataset)
     trainLoader = Data.DataLoader(dataset=trainSet.dataset, sampler=trainSampler, batch_size=config.batch_size // args.num_gpu,
                               drop_last=True, num_workers=config.loadThread, pin_memory=True)
 
-    testSet = DataLoader("test", config)
     testSampler = torch.utils.data.distributed.DistributedSampler(testSet.dataset)
     testLoader = Data.DataLoader(dataset=testSet.dataset, sampler=testSampler, batch_size=config.batch_size // args.num_gpu,
                               drop_last=True, num_workers=config.loadThread, pin_memory=True)
@@ -119,7 +143,7 @@ def multi_training(args, config):
     # https://pytorch.org/docs/stable/generated/torch.optim.Adam.html#torch.optim.Adam
     criterion0 = nn.BCELoss().cuda(args.local_rank)
     criterion1 = nn.MSELoss().cuda(args.local_rank)
-    optimizer = torch.optim.Adam(net.parameters(), lr=1e-3, weight_decay=1e-5, amsgrad=True)
+    optimizer = torch.optim.Adam(net.parameters(), lr=1e-6, amsgrad=True)
     lr_scheduler = torch.optim.lr_scheduler.ExponentialLR(optimizer, gamma=0.9)
     gaussian = normal.Normal(0.0, 1.0)
 
@@ -127,7 +151,7 @@ def multi_training(args, config):
     trainLossDec_plot = np.zeros(config.epochs)
     testLossEnc_plot = np.zeros(config.epochs)
     testLossDec_plot = np.zeros(config.epochs)
-    earlyStop = EarlyStop(patience=config.patience, threshold=config.threshold)
+    #earlyStop = EarlyStop(patience=config.patience, threshold=config.threshold)
 
     # training and validation
     torch.set_grad_enabled(True)
@@ -143,7 +167,7 @@ def multi_training(args, config):
 
         net.train()
         for batch_idx, data in enumerate(trainLoader):  
-            # get the inputs; data is a list of [inputs, labels]
+            # get the inputs; data is a list of [inputs, labels] 
             inputs, labels = data
             labels = float(1.0) - labels
 
@@ -163,6 +187,7 @@ def multi_training(args, config):
             optimizer.zero_grad()
 
             # forward + backward + optimize
+            # https://github.com/jvanvugt/pytorch-unet/blob/master/README.md ***** CRUCIAL CROPPING 
             enc = net(inputs, returns='enc')
             #define loss function here
             enc_loss=criterion1(enc, labels)  
@@ -221,29 +246,36 @@ def multi_training(args, config):
             print("#%d: epoch_time: %8.2f, ~time_left: %8.2f" % (epoch, end_time-start_time, (end_time-start_time)*(config.epochs - epoch)))
 
             # Early stop
-            if earlyStop(test_loss_enc):
-                print("Early stop activated.")
-                break
+            #if earlyStop(test_loss_enc):
+            #    print("Early stop activated.")
+            #    break
 
         lr_scheduler.step()
 
     if args.local_rank == 0:
         # save trained model
-        torch.save(net.state_dict(), config.savepath)
+        torch.save(net.state_dict(), args.datapath + args.model_name)
         # plot loss
-        timex = np.arange(0, config.epochs, 1)
-        plt.plot(timex, trainLossEnc_plot, color='r', label='train_e')
-        plt.plot(timex, trainLossDec_plot, color='m', label='train_d')
-        plt.plot(timex, testLossEnc_plot, color='b', label='test_e')
-        plt.plot(timex, testLossDec_plot, color='c', label='test_d')
+        timex = np.arange(0, epoch+1, 1)
+        plt.plot(timex, trainLossEnc_plot[0:epoch+1], color='r', label='train_e')
+        plt.plot(timex, trainLossDec_plot[0:epoch+1], color='m', label='train_d')
+        plt.plot(timex, testLossEnc_plot[0:epoch+1], color='b', label='test_e')
+        plt.plot(timex, testLossDec_plot[0:epoch+1], color='c', label='test_d')
         plt.xlabel("epoch")
         plt.ylabel("loss")
         plt.legend()
-        plt.savefig(config.savepath_loss)
-
-        print('Finished Training')
+        plt.savefig(args.datapath + args.loss_name)
 
 
+def unpad(x, pad):
+    if pad[2]+pad[3] > 0:
+        x = x[:,:,:,pad[2]:-pad[3],:]
+    if pad[0]+pad[1] > 0:
+        x = x[:,:,:,:,pad[0]:-pad[1]]
+    if pad[4]+pad[5] > 0:
+        x = x[:,:,pad[4]:-pad[5],:,:]
+    return x
+ 
 def train_epoch(trainloader, optimizer):
     global net
     net.train()
@@ -253,33 +285,29 @@ def train_epoch(trainloader, optimizer):
     test_loss_enc = 0.0
     test_loss_dec = 0.0
     for batch_idx, data in enumerate(trainloader):
-        # get the inputs; data is a list of [inputs, labels]
-        inputs, labels = data
-        # zero pad input and label by 1 on each side to make it 32x32x32
-        p3d = (1, 1, 1, 1, 1, 1)
-        inputs = F.pad(inputs, p3d, "constant", 0)
-        labels = F.pad(labels, p3d, "constant", 0)
-        # add dimension to match conv3d weights
-        inputs = inputs.unsqueeze(1)
-        labels = labels.unsqueeze(1)
+        # ge t the inputs; data is a list of [inputs, labels]
+        inputs, labels, dec_labels = data
 
         # convert to cuda compatible
         if torch.cuda.is_available():
             inputs = inputs.cuda()
-            labels = labels.cuda()
-
+            labels = labels.cuda()            
+            dec_labels = dec_labels.cuda()
         # zero the parameter gradients
         optimizer.zero_grad()
 
         # forward + backward + optimize
+        # https://github.com/jvanvugt/pytorch-unet/blob/master/README.md ***** CRUCIAL CROPPING 
         enc = net(inputs, returns='enc')
         #define loss function here
-        enc_loss=criterion(torch.sigmoid(enc), labels)
+
+        enc_loss=criterion(enc, labels)
         enc_loss.backward()
         optimizer.step()
         optimizer.zero_grad()
         dec = net(inputs, returns='dec')
-        rec_loss=criterion(dec, gaussian.cdf(inputs))
+
+        rec_loss=criterion(dec, dec_labels)
         rec_loss.backward()
         optimizer.step()
 
@@ -298,24 +326,19 @@ def test_epoch(testloader, optimizer):
 
     with torch.no_grad():
         for batch_idx, data in enumerate(testloader):
-            # get the inputs; data is a list of [inputs, labels]
-            inputs, labels = data
-            # zero pad input and label by 1 on each side to make it 32x32x32
-            p3d = (1, 1, 1, 1, 1, 1)
-            inputs = F.pad(inputs, p3d, "constant", 0)
-            labels = F.pad(labels, p3d, "constant", 0)
-            # add dimension to match conv3d weights
-            inputs = inputs.unsqueeze(1)
-            labels = labels.unsqueeze(1)
+            # ge t the inputs; data is a list of [inputs, labels]
+            inputs, labels, dec_labels = data
 
             # convert to cuda compatible
             if torch.cuda.is_available():
                 inputs = inputs.cuda()
-                labels = labels.cuda()
+                labels = labels.cuda()            
+                dec_labels = dec_labels.cuda()
 
             enc, dec = net(inputs)
+
             enc_loss=criterion(enc, labels)
-            rec_loss=criterion(dec, gaussian.cdf(inputs))
+            rec_loss=criterion(dec, dec_labels)
 
             test_loss_enc += enc_loss.item()
             test_loss_dec += rec_loss.item()

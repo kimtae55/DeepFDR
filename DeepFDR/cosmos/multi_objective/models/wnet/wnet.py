@@ -47,7 +47,6 @@ class UEnc(nn.Module):
         self.enc4=Block(4*ch_mul, 8*ch_mul)
 
         self.middle=Block(8*ch_mul, 16*ch_mul)
-        #self.middle=Block(2*ch_mul, 4*ch_mul)
 
         self.up1=nn.ConvTranspose3d(16*ch_mul, 8*ch_mul, kernel_size=3, stride=2, padding=1, output_padding=1)
         self.dec1=Block(16*ch_mul, 8*ch_mul)
@@ -95,8 +94,7 @@ class UDec(nn.Module):
         self.enc4=Block(4*ch_mul, 8*ch_mul)
 
         self.middle=Block(8*ch_mul, 16*ch_mul)
-        #self.middle=Block(2*ch_mul, 4*ch_mul)
-        
+
         self.up1=nn.ConvTranspose3d(16*ch_mul, 8*ch_mul, kernel_size=3, stride=2, padding=1, output_padding=1)
         self.dec1=Block(16*ch_mul, 8*ch_mul)
         self.up2=nn.ConvTranspose3d(8*ch_mul, 4*ch_mul, kernel_size=3, stride=2, padding=1, output_padding=1)
@@ -138,33 +136,27 @@ class UDec(nn.Module):
         return final
 
 class WNet(nn.Module):
-    def __init__(self, squeeze, ch_mul=64, in_chans=1, out_chans=1000):
+    def __init__(self, **kwargs):
         super(WNet, self).__init__()
-        if out_chans==1000:
-            out_chans=in_chans
+        squeeze = 1 # number of classes
+        out_chans = 1
+        in_chans = 3
+        ch_mul = 64
         self.UEnc=UEnc(squeeze, ch_mul, in_chans)
         self.UDec=UDec(squeeze, ch_mul, out_chans)
         self.p3d = (1, 1, 1, 1, 1, 1)
 
-    def forward(self, x, returns='both'):
+    def forward(self, batch):
+        x = batch['data']
         enc = torch.sigmoid(self.UEnc(x))
-
-        unpadded_enc = self.unpad(enc, self.p3d)
-
-        if returns=='enc':
-            return unpadded_enc 
-
         dec = torch.sigmoid(self.UDec(enc))
 
+        unpadded_enc = self.unpad(enc, self.p3d)
         unpadded_dec = self.unpad(dec, self.p3d)
-        if returns=='dec':
-            return unpadded_dec
+        return dict(logits_l=unpadded_enc, logits_r=unpadded_dec)
 
-        if returns=='both':
-            return unpadded_enc, unpadded_dec
-
-        else:
-            raise ValueError('Invalid returns, returns must be in [enc dec both]')
+    def private_params(self):
+        return ['enc.weight', 'enc.bias', 'dec.weight', 'dec.bias']
 
     def unpad(self, x, pad):
         if pad[2]+pad[3] > 0:

@@ -3,32 +3,27 @@ import torch.utils.data as Data
 import os
 import glob
 import numpy as np
-import pdb
-from configure import Config
 import math
+import torch.nn.functional as F
+from torch.distributions import normal
 
-class DataLoader():
+class DataLoader(torch.utils.data.Dataset):
     #initialization
     #datapath : the data folder of bsds500
     #mode : train/test/val
-    def __init__(self, mode, config, args):
-
-        self.config = config
-
+    def __init__(self, datapath, split, **kwargs):
         train_input_path = os.path.join(datapath, 'data', 'data.npz')
         target_input_path = os.path.join(datapath, 'data', 'label.npz')
 
-        train_split = 5000
-        valid_split = 1000
+        train_split = 100
+        valid_split = 100
 
-        if mode == 'train':
+        if split == 'train':
             self.X = np.load(train_input_path)['arr_0'][0:train_split]
             self.y = np.load(target_input_path)['arr_0'][0:train_split]
-            self.data_len = 5000
-        elif mode == 'test':
+        elif split == 'test':
             self.X = np.load(train_input_path)['arr_0'][train_split:train_split+valid_split]
             self.y = np.load(target_input_path)['arr_0'][train_split:train_split+valid_split]
-            self.data_len = 1000
 
         self.X = torch.FloatTensor(self.X)
         self.y = float(1.0) - torch.FloatTensor(self.y) # P(h=0|x)
@@ -45,28 +40,15 @@ class DataLoader():
         self.y_1 = gaussian.cdf(self.X)
         self.y_1 = self.y_1.unsqueeze(1)
 
-        #form dataset
-        self.dataset = self.form_dataset()
+        print("X: ", self.X_pad.shape)
+        print("y0: ", self.y_0.shape)
+        print("y1: ", self.y_1.shape)
 
-    def form_dataset(self):
-        dataset = []
-        for batch_id in range(0, self.X_pad.shape[0], self.config.batch_size):
-            input = self.X_pad[batch_id:min(self.X_pad.shape[0],batch_id+self.config.batch_size)]
-            y_0 = self.y_0[batch_id:min(self.y_0.shape[0],batch_id+self.config.batch_size)]
-            y_1 = self.y_1[batch_id:min(self.y_1.shape[0],batch_id+self.config.batch_size)]
-            dataset.append(Data.TensorDataset(input, y_0, y_1))
-        return Data.ConcatDataset(dataset)
-
+    def __getitem__(self, index):
+        return dict(data=self.X_pad[index], labels_l=self.y_0[index], labels_r=self.y_1[index])
+    
     def __len__(self):
-        return self.data_len // self.config.batch_size
+        return len(self.X)
 
-if __name__ == "__main__":
-    config = Config()
-
-    trainset = DataLoader("train", config)
-    trainloader = trainset.torch_loader()
-
-    for i, data in enumerate(trainloader, 0):
-        # get the inputs; data is a list of [inputs, labels]
-        inputs, labels = data
-        print(inputs, labels)
+    def task_names(self):
+        return ['l', 'r']

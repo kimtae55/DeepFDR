@@ -7,15 +7,15 @@
 
 Folder Structure:
 
-<ins>**sHMRF**</ins> contains Nearest-neighbor homogeneous HMRFs, a Python implementation of https://github.com/shu-hai/FDRhmrf
+<ins>sHMRF</ins> contains Nearest-neighbor homogeneous HMRFs, a Python implementation of https://github.com/shu-hai/FDRhmrf
 
-**cHMRF** - High-order-neighborhood non-homogeneous HMRFs
+<ins>cHMRF</ins> - High-order-neighborhood non-homogeneous HMRFs
 
-**graph** - Short-/long-range and graph-based spatial dependencies
+<ins>graph</ins> - Short-/long-range and graph-based spatial dependencies
 
-**DL** - W-Net based self-supervised segmentation model
+<ins>DL</ins> - W-Net based self-supervised segmentation model
 
-**cosmos** - W-Net based multi-objective optimization (MOO) model 
+<ins>cosmos</ins> - W-Net based multi-objective optimization (MOO) model 
 
 ## Overview
 ## Installation

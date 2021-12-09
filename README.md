@@ -7,7 +7,7 @@
 
 Folder Structure:
 
-**sHMRF** contains Nearest-neighbor homogeneous HMRFs, a Python implementation of https://github.com/shu-hai/FDRhmrf
+<ins>**sHMRF**<ins> contains Nearest-neighbor homogeneous HMRFs, a Python implementation of https://github.com/shu-hai/FDRhmrf
 
 **cHMRF** - High-order-neighborhood non-homogeneous HMRFs
 

@@ -2,7 +2,7 @@
 
 ## Table of Contents
 * [Overview](#overview)
-* [Folder Structure](#Folder Structure)
+* [Folder Structure](#Folder-Structure)
 * [Installation](#requirements-and-installation)
 * [Example](#example)
 

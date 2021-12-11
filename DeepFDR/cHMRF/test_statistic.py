@@ -6,6 +6,7 @@ import math
 import matplotlib.pyplot as plt
 import torch
 import sys
+import argparse
 
 class Data:
     SIZE = 30
@@ -23,7 +24,7 @@ class Data:
         self.theta = np.loadtxt(path).reshape((Data.SIZE, Data.SIZE, Data.SIZE))
         return self.theta
 
-    def generate_x_directly(self, p_l, mu_l, sigma_l, L, subjects, groups):
+    def generate_x_directly(self, p_l, mu_l, sigma_l, subjects, groups):
         mu, sigma = 0, 1
         x = np.zeros((Data.SIZE, Data.SIZE, Data.SIZE))
 
@@ -75,4 +76,4 @@ if __name__ == "__main__":
     print("sigma_l: ", sigma_l)
     print("Generating Test Statistics...")
 
-    data.generate_x_directly(p_l=p_l, mu_l=mu_l, sigma_l=sigma_l, L=L, subjects=subjects, groups=groups)
+    data.generate_x_directly(p_l=p_l, mu_l=mu_l, sigma_l=sigma_l, subjects=subjects, groups=groups)

@@ -2,11 +2,13 @@
 
 ## Table of Contents
 * [Overview](#overview)
+* [Folder Structure](#Folder Structure)
 * [Installation](#requirements-and-installation)
 * [Example](#example)
 
-Folder Structure:
+## Overview
 
+## Folder Structure
 <ins>sHMRF</ins> contains Nearest-neighbor homogeneous HMRFs, a Python implementation of https://github.com/shu-hai/FDRhmrf
 
 <ins>cHMRF</ins> - High-order-neighborhood non-homogeneous HMRFs
@@ -17,7 +19,6 @@ Folder Structure:
 
 <ins>cosmos</ins> - W-Net based multi-objective optimization (MOO) model 
 
-## Overview
 ## Installation
 The project uses ```Python 3.8```.
 
@@ -30,4 +31,3 @@ Running cHMRF:
 2) Generate groundtruth label ```python groundtruth.py rng_seed``` (Specify an integer for the rng_seed, use the same seed for below steps)
 3) Generate test statistics 'x' ```python test_statistic.py --seed rng_seed --p_0 0.5 --p_1 0.5 --mu_0 -2.0 --mu_1 2.0 --sig_0 1.0 --sig_1 1.0```
 4) Run gem and compute lis ```python gem.py --seed rng_seed```
-

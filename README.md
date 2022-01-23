@@ -15,7 +15,7 @@
 
 ```graph``` - Short-/long-range and graph-based spatial dependencies
 
-```DL``` - W-Net based self-supervised segmentation model
+```DL``` - W-Net based supervised segmentation model
 
 ```cosmos``` - W-Net based multi-objective optimization (MOO) model 
 

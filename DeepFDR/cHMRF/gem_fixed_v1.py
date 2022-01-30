@@ -1,6 +1,6 @@
 import numpy as np
 import os
-from test_statistic import Data
+from train_data import Data
 import math
 import time
 import torch
@@ -8,22 +8,23 @@ import torch.nn as nn
 import torch.nn.functional as F
 import sys
 import numba
-import pandas as pd
 from numba import cuda, float32, int32, guvectorize, vectorize, config, float64
+import argparse
 
 class Model2:
-    def __init__(self, x_file, rng_seed):
+    def __init__(self, x, rng_seed, savepath):
         torch.set_default_dtype(torch.float64)
-        self.SAVE_DIR = os.path.join(os.getcwd(), '../data/model2/' + str(rng_seed) +'/result')
+        self.SAVE_DIR = os.path.join(savepath, 'result')
         if not os.path.exists(self.SAVE_DIR):
             os.makedirs(self.SAVE_DIR)
 
         self.params = torch.tensor([-94.5000, -911.2500, -6302.1609, -6505.2827, -707.8399])
         self.groundtruth_phi = torch.tensor([  -81.0000,  -729.0000, -5251.8007, -5692.1224,  -606.7199]) # groundtruth  for 0.11
         self.params_prev = torch.tensor([-94.5000, -911.2500, -6302.1609, -6505.2827, -707.8399])
-        self.pL = torch.tensor([0.5, 0.5])
-        self.muL = torch.tensor([-3.0, 2.0])
-        self.sigmaL2 = torch.tensor([1.0, 1.0])
+
+        self.pL = torch.tensor([0.4959, 0.5041])
+        self.muL = torch.tensor([-3.0493, 1.9706])
+        self.sigmaL2 = torch.tensor([1.0069, 1.0482])
         self.pL_prev = torch.zeros(2)
         self.muL_prev = torch.zeros(2)
         self.sigmaL2_prev = torch.zeros(2)
@@ -31,7 +32,7 @@ class Model2:
         self.const = {'a': 1,  # for penalized likelihood for L >= 2
                       'b': 2,
                       'delta': 1e-3,
-                      'maxIter': 200,
+                      'maxIter': 100,
                       'eps1': 1.0,
                       'eps2': 0.2,
                       'eps3': 0.02,
@@ -39,13 +40,13 @@ class Model2:
                       'eps5': 1e-2,
                       'alpha': 1e-3,
                       'burn_in': 80, # 80
-                      'num_samples': 50, # 30
+                      'num_samples': 100, # 100
                       'L': 2,
                       'newton_max': 3,
                       'fdr_control': 0.1,
                       }
 
-        self.x = torch.from_numpy(np.loadtxt(x_file).reshape((Data.SIZE,Data.SIZE,Data.SIZE)))
+        self.x = torch.from_numpy(x)
         self.gamma = torch.zeros(self.x.shape)  # P(theta | x)
         self.init = torch.zeros(self.x.shape)  # initial theta value for gibb's sampling
         self.H_x = torch.zeros(5)
@@ -62,10 +63,8 @@ class Model2:
         self.init = torch.bernoulli(init_prob)  # p = 0.5 to choose 1
         self.H_reparam = torch.zeros(5)
         self.reparameterization_factor()
-        self.Q2 = torch.zeros(self.const['maxIter'])
 
-        self.t_ij = np.load(os.path.join(os.getcwd(), 't_ij.npy'))
-        self.theta_sum = np.load(os.path.join(os.getcwd(), 'theta_sum.npy'))
+        self.dist = np.load('distance.npy') # 27000x30x30x30, distance between voxel i and all other voxels
 
         self.start = time.time()
         self.end = 0
@@ -107,7 +106,7 @@ class Model2:
             # ----------------------------------------CHECKPOINT MARKER-------------------------------------------------------#
             # Gibb's sampler to generate theta and theta_x
             self.theta, self.H_mean, self.H_iter, self.exp_sum, g = self.gibb_sampler(self.const['burn_in'], self.const['num_samples'], torch.zeros(self.x.shape))
-            hs = torch.log(ln_1 / ln_0) 
+            hs = torch.log(ln_1 / ln_0)
             theta_x, self.H_x, self.H_x_iter, exp_x_sum, self.gamma = self.gibb_sampler(self.const['burn_in'], self.const['num_samples'], hs)
 
             # Monte carlo averages
@@ -115,8 +114,8 @@ class Model2:
             self.H_x /= self.const['num_samples']
             self.gamma /= self.const['num_samples']
             gamma_sum = torch.sum(self.gamma)
-            
-            
+
+
             # compute log factor for current varphi
             # Because np.exp can overflow with large value of exp_sum, a modification is made
             # where we subtract by max_val. Same is done for log_sum_next
@@ -146,10 +145,10 @@ class Model2:
                 self.sigmaL2[l] = (2.0 * self.const['a'] + self.sum_sigmaL2(omega[l], self.x, self.muL[l])) \
                                             / (2.0 * self.const['b'] + omega_sum[l])
                 self.pL[l] = (omega_sum[l]) / (gamma_sum)
-                
+
             # find varphi(t+1) that satisfies Armijo condition and compute Q2(t+1) - Q2(t)
             self.computeArmijo(t, self.const['maxIter'])
-            
+
             # check for parameter convergence (13) using phi and varphi
             if self.converged():
                 self.convergence_count += 1
@@ -158,14 +157,11 @@ class Model2:
                     break
             else:
                 self.convergence_count = 0
-             
+
             self.end = time.time()
             print("time elapsed:", self.end - self.start)
-            
-        Q2_np = self.Q2.cpu().numpy()
-        Q2_df = pd.DataFrame(Q2_np)
-        Q2_df.to_csv(self.SAVE_DIR + '/deltaQ2.csv')
-        
+
+
         # Save B, H, mu, sigma, pl, gamma
         params_directory = os.path.join(self.SAVE_DIR, 'params.txt')
         with open(params_directory, 'w') as outfile:
@@ -177,22 +173,7 @@ class Model2:
             outfile.write('# muL\n')
             np.savetxt(outfile, self.muL.cpu().numpy(), fmt='%-8.4f')
 
-        print("Computing 1e5 samples for LIS")
-        # generate gamma using 10000 samples 
-        ln_1 = 0
-        for l in range(self.const['L']):
-            ln_1 += ((self.pL[l]) / (torch.sqrt(2 * torch.pi * self.sigmaL2[l]))) * torch.exp(-(torch.pow(self.x - self.muL[l], 2)) / (2 * self.sigmaL2[l]))
-        hs = torch.log(ln_1 / ln_0) 
-        self.gamma = self.gibb_sampler_nocomp(100, 10000, hs)
-        self.gamma /= 10000
 
-        gamma_directory = os.path.join(self.SAVE_DIR, 'gamma.txt')
-        with open(gamma_directory, 'w') as outfile:
-            for data_slice in self.gamma.cpu().numpy():
-                np.savetxt(outfile, data_slice, fmt='%-8.4f')
-                outfile.write('# New z slice\n')
-
-        print("Q2(max_iter) - Q(0): ", torch.sum(self.Q2))
         self.end = time.time()
         print("time elapsed:", self.end - self.start)
 
@@ -217,12 +198,11 @@ class Model2:
                 print("alternative condition: ", max_val)
                 self.params = self.params_prev
                 break
-            
+
             # use Gibbs sampler again to compute log_factor for delta_Q2 approximation
             log_factor = self.computeLogFactor()
 
             deltaQ2 = torch.matmul(self.params - self.params_prev, self.H_x) + log_factor
-            self.Q2[epoch] = deltaQ2
 
             print("deltaQ2: [" + str(deltaQ2) + "]")
             if deltaQ2 > 0:
@@ -271,7 +251,7 @@ class Model2:
             return True
 
         return False
-        
+
     def gibb_sampler(self, burn_in, n_samples, hs):
         # initialize labels
         H_iter = torch.zeros((n_samples, 5))
@@ -285,11 +265,11 @@ class Model2:
         np_params = (self.params / self.H_reparam).cpu().numpy().astype('float64')
         np_hs = hs.cpu().numpy().astype('float64')
         while iteration < n_samples:
-            theta = torch.from_numpy(run(Data.SIZE, np_params, theta.cpu().numpy().astype('float64'), self.theta_sum, self.t_ij, np_hs))
+            theta = torch.from_numpy(run(Data.SIZE, np_params, theta.cpu().numpy().astype('float64'), self.dist, np_hs))
             if iter_burn < burn_in:
                 iter_burn += 1
             else:
-                
+
                 theta_sum = torch.sum(theta)
 
                 # do later
@@ -328,28 +308,42 @@ class Model2:
                 H_iter[iteration] /= self.H_reparam
                 exp_sum[iteration] = -torch.sum(self.params*H_iter[iteration])
                 # divde H(0.5) after calculating exp_sum
-                
+
                 gamma += theta
 
                 iteration += 1
         return theta, H_mean, H_iter, exp_sum, gamma
 
-    def gibb_sampler_nocomp(self, burn_in, n_samples, hs):
+    def gibb_sampler_nocomp(self, burn_in, n_samples, params, pL, sigmaL2, muL, x):
+        mu_0 = 0
+        sigma0_sq = 1
+        const_0 = 1 / torch.sqrt(torch.tensor([2 * torch.pi * sigma0_sq]))
+        ln_0 = const_0 * torch.exp(-(torch.pow(x - mu_0, 2)) / (2 * sigma0_sq))
+
+        # calculate hs(t)
+        ln_1 = 0
+        for l in range(self.const['L']):
+            ln_1 += ((pL[l]) / (torch.sqrt(2 * torch.pi * sigmaL2[l]))) * torch.exp(-(torch.pow(x - muL[l], 2)) / (2 * sigmaL2[l]))
+        # ----------------------------------------CHECKPOINT MARKER-------------------------------------------------------#
+        # Gibb's sampler to generate theta and theta_x
+        hs = torch.log(ln_1 / ln_0)
+
         # initialize labels
-        gamma = torch.zeros(self.x.shape)
+        gamma = torch.zeros(x.shape)
         theta = self.init.clone()
 
         iteration = 0
         iter_burn = 0
-        np_params = (self.params / self.H_reparam).cpu().numpy().astype('float64')
+        np_params = (params / self.H_reparam).cpu().numpy().astype('float64')
         np_hs = hs.cpu().numpy().astype('float64')
         while iteration < n_samples:
-            theta = torch.from_numpy(run(Data.SIZE, np_params, theta.cpu().numpy().astype('float64'), self.theta_sum, self.t_ij, np_hs))
+            theta = torch.from_numpy(run(Data.SIZE, np_params, theta.cpu().numpy().astype('float64'), self.dist, np_hs))
             if iter_burn < burn_in:
                 iter_burn += 1
             else:
                 gamma += theta
                 iteration += 1
+        gamma /= n_samples
         return gamma
 
     def compute_I_inverse(self, num_samples, H, H_mean):
@@ -364,11 +358,11 @@ class Model2:
 
     def norm(self, x, mu, sigma2):
         return torch.exp(-1 * (x - mu) * (x - mu) / (2 * sigma2)) / (torch.sqrt(2 * torch.pi * sigma2))
-    
+
     def sum_muL(self, omega, x):
         return torch.sum(omega * x)
 
-    def sum_sigmaL2(self, omega, x, muL):       
+    def sum_sigmaL2(self, omega, x, muL):
         return torch.sum(omega * torch.pow(x - muL, 2))
 
     def reparameterization_factor(self):
@@ -394,8 +388,8 @@ class Model2:
                 for vk in range(Data.SIZE):
                     index = (vk * Data.SIZE * Data.SIZE) + (vy * Data.SIZE) + vx
                     lis[index]['index'] = index
-                    # can't just do this 
-                    lis[index]['value'] = 1 - gamma_1[vx][vy][vk] 
+                    # can't just do this
+                    lis[index]['value'] = 1 - gamma_1[vx][vy][vk]
         # sort using lis values
         lis = np.sort(lis, order='value')
         # Data driven LIS-based FDR procedure
@@ -403,7 +397,6 @@ class Model2:
         k = 0
         for j in range(len(lis)):
             sum += lis[j]['value']
-            print(j, lis[j]['value'])
             if sum > (j+1)*self.const['fdr_control']:
                 k = j
                 break
@@ -422,7 +415,7 @@ class Model2:
             signal_lis[vx][vy][vk] = 0  # reject these voxels, rest are 1
 
         # Compute FDR, FNR, ATP using LIS and Label
-        # FDR -> (theta = 0) / num_rejected 
+        # FDR -> (theta = 0) / num_rejected
         # FNR -> (theta = 1) / num_not_rejected
         # ATP -> (theta = 1) that is rejected
         num_rejected = k
@@ -436,7 +429,7 @@ class Model2:
                     if signal_lis[i][j][k] == 0: # rejected
                         if label[i][j][k] == 0:
                             fdr += 1
-                        elif label[i][j][k] == 1: 
+                        elif label[i][j][k] == 1:
                             atp += 1
                     elif signal_lis[i][j][k] == 1: # not rejected
                         if label[i][j][k] == 1:
@@ -451,7 +444,7 @@ class Model2:
             fnr = 0
         else:
             fnr /= num_not_rejected
-        
+
         # Save final signal_file
         signal_directory = os.path.join(self.SAVE_DIR, 'lis.txt')
         with open(signal_directory, 'w') as outfile:
@@ -463,19 +456,28 @@ class Model2:
                 outfile.write('# New z slice\n')
         return
 
+@vectorize([float64(float64, float64, float64, float64, float64)], target ='cpu')
+def theta_ij(dist, B_1, B_1d, B_2d, B_3d):
+    #return (B_1 + B_3d * dist*dist*dist + B_3r * rho*rho*rho + B_2d * dist*dist + B_2r * rho*rho + B_1d * dist + B_1r * rho)
+    return B_1 + B_3d*dist*dist*dist + B_2d*dist*dist + B_1d*dist
+
 @vectorize([float64(float64, float64)], target ='cpu')
 def hj_theta(t_ij, result):
     return t_ij * result
 
 @numba.njit(cache = True, parallel=True)
-def run(voxel_size, params, label, theta_sum, t_ij, hs):
+def run(voxel_size, params, label, dist, hs):
     result = label
     for i in numba.prange(voxel_size):
         for j in numba.prange(voxel_size):
             for k in numba.prange(voxel_size):
-                hj_t = hj_theta(t_ij[30*30*i + 30*j + k], result)
+                t_ij = theta_ij(dist[30*30*i + 30*j + k], params[1], params[2], params[3], params[4])
+                theta_sum = np.sum(t_ij)
+
+                hj_t = hj_theta(t_ij, result)
                 hj_theta_sum = np.sum(hj_t)
-                numerator = np.exp((-theta_sum[i][j][k] - params[0] + hs[i][j][k] + hj_theta_sum))
+
+                numerator = np.exp(-theta_sum - params[0] + hs[i][j][k] + hj_theta_sum)
 
                 p = numerator / (1 + numerator)
                 if np.isnan(p): #because lim inf/1+inf ~ 1
@@ -490,27 +492,86 @@ def hi_dij(A, B):
     sqrB = torch.sum(torch.pow(B, 2), 1, keepdim=True).expand(B.shape[0], A.shape[0]).t()
     return torch.sqrt(sqrA - 2 * torch.mm(A, B.t()) + sqrB)
 
+def parse_params(params_file):
+    p = torch.zeros(2)
+    mu = torch.zeros(2)
+    sigma = torch.zeros(2)
+
+    with open(params_file, 'r') as file:
+        lines = file.readlines()
+        params = torch.tensor([float64(i.strip()) for i in lines[0:5]])
+        pL = torch.tensor([float64(i.strip()) for i in lines[6:8]])
+        sigmaL2 = torch.tensor([float64(i.strip()) for i in lines[9:11]])
+        muL = torch.tensor([float64(i.strip()) for i in lines[12:14]])
+
+    return params, pL, sigmaL2, muL
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Test_Statistics Generation')
     parser.add_argument('--seed', type=int)
+    parser.add_argument('--mode', type=str, help='Supported modes: gem_gen, label_gen', required=True)
+    parser.add_argument('--start', default=0, type=int)
+    parser.add_argument('--x_path', type=str)
+    parser.add_argument('--savepath', type=str)
+    parser.add_argument('--simulation_path', type=str)
+    parser.add_argument('--limit', default=600, type=int)
+    parser.add_argument('--label_path', type=str)
     args = parser.parse_args()
 
+    num_files_per_section = 600
     rng_seed = args.seed
+    start = args.start # 0, 30, 60, 90, 120, 150, 180, 210, 240, 270
+    limit = args.limit
+    mode = args.mode
+
     torch.manual_seed(rng_seed)
-    np.random.seed(int(rng_seed))
+    np.random.seed(rng_seed)
     torch.set_default_dtype(torch.float64)
     numba.set_num_threads(int(numba.config.NUMBA_NUM_THREADS))
 
-    fdr = Model2('../data/model2/' + str(rng_seed) +'/x.txt', rng_seed)
-    fdr.gem()
-    gamma_file = '../data/model2/' + str(rng_seed) +'/result' +'/gamma.txt'
-    label_file = '../data/model2/' + str(rng_seed) +'/label/label.txt'
-    fdr.p_lis(np.loadtxt(gamma_file).reshape((Data.SIZE,Data.SIZE,Data.SIZE)),
-            np.loadtxt(label_file).reshape((Data.SIZE,Data.SIZE,Data.SIZE)))
 
+    if mode == "gem_gen":
+        npzfile = np.load(os.path.join(args.x_path, 'data.npz'))
+        x = npzfile['arr_0'][0] # first in list
+        fdr = Model2(x, rng_seed, args.savepath)
+        fdr.gem()
 
+        label = np.load(args.label_path)
+        x = torch.from_numpy(x)
+        params_directory = os.path.join(args.savepath, 'result/params.txt')
+        params, pL, sigmaL2, muL = parse_params(params_directory)
+        gamma = fdr.gibb_sampler_nocomp(burn_in=1000, n_samples=5000, params=params, pL=pL, sigmaL2=sigmaL2, muL=muL, x=x)
+        fdr.p_lis(gamma.cpu().numpy(), label)
 
+    elif mode == "label_gen": 
+        npzfile = np.load(os.path.join(args.x_path, 'data.npz'))
 
+        fdr = Model2(npzfile['arr_0'][0], rng_seed, args.savepath)
 
+        label_npzarray = np.empty((npzfile['arr_0'].shape[0], 30, 30, 30))
 
+        for i in range(limit):        
+            x = torch.from_numpy(npzfile['arr_0'][num_files_per_section*rng_seed + start + i])
+            params_directory = os.path.join(args.savepath, 'result/params.txt')
+            params, pL, sigmaL2, muL = parse_params(params_directory)
+            # burn_in = 80, n_samples = 2000 for simulation
+            gamma = fdr.gibb_sampler_nocomp(burn_in=1000, n_samples=5000, params=params, pL=pL, sigmaL2=sigmaL2, muL=muL, x=x)
+            label_npzarray[num_files_per_section*rng_seed + start + i] = gamma.cpu().numpy()            
 
+        train_label_directory = os.path.join(args.x_path, 'label.npz') 
+        if not os.path.exists(train_label_directory):
+            np.savez(train_label_directory, label_npzarray)
+        else:
+            orig = np.load(train_label_directory)
+            orig_data = orig['arr_0']
+            orig_data[num_files_per_section*rng_seed + start:num_files_per_section*rng_seed + start + limit] = label_npzarray[num_files_per_section*rng_seed + start:num_files_per_section*rng_seed + start + limit]
+            np.savez(train_label_directory, orig_data)
+    elif mode == "single_label":
+        x = np.loadtxt(os.path.join(args.x_path, 'x_val_direct.txt')).reshape((30,30,30))
+        label = np.loadtxt(os.path.join(args.savepath, 'label/label.txt')).reshape((30,30,30))
+        fdr = Model2(x, rng_seed, args.savepath)
+        fdr.gem()
+        params_directory = os.path.join(args.savepath, 'result/params.txt')
+        params, pL, sigmaL2, muL = parse_params(params_directory)
+        gamma = fdr.gibb_sampler_nocomp(burn_in=80, n_samples=5000, params=params, pL=pL, sigmaL2=sigmaL2, muL=muL, x=x)
+        p_lis(gamma.cpu().numpy(), label)

@@ -32,7 +32,7 @@ class Model2:
         self.const = {'a': 1,  # for penalized likelihood for L >= 2
                       'b': 2,
                       'delta': 1e-3,
-                      'maxIter': 50,
+                      'maxIter': 1,
                       'eps1': 1e-4,
                       'eps2': 0.05,
                       'eps3': 0.02,
@@ -594,23 +594,7 @@ if __name__ == "__main__":
 
     ray.init(num_cpus=num_cpus)
 
-    if mode == "gem_gen":
-        x = np.load(os.path.join(args.x_path, 'x.npy'))
-        model = Model2(x, args.savepath, num_cpus)
-
-        dist = np.memmap(os.path.join(args.savepath, 'distance.npy'), dtype='float16', mode='r', shape=(model.size, model.size)).astype(np.float32) # -----------------------------ADD RAY
-        global dist_id
-        dist_id = ray.put(dist)
-
-        model.gem()
-
-        label = np.load(args.label_path)
-        params_directory = os.path.join(args.savepath, 'result/params.txt')
-        params, pL, sigmaL2, muL = parse_params(params_directory)
-        gamma = model.gibb_sampler_nocomp(burn_in=100, n_samples=2000, params=params, pL=pL, sigmaL2=sigmaL2, muL=muL, x=x)
-        model.p_lis(gamma, label)
-
-    elif mode == "label_gen": 
+    if mode == "label_gen": 
         npzfile = np.load(os.path.join(args.x_path, 'data.npz'))
         fdr = Model2(npzfile['arr_0'][0], args.savepath)
         label_npzarray = np.empty((npzfile['arr_0'].shape[0], 30, 30, 30))
@@ -633,13 +617,22 @@ if __name__ == "__main__":
             np.savez(train_label_directory, orig_data)
             
     elif mode == "single_label":
-        x = np.load(os.path.join(args.x_path, 'x.npy'))
-        fdr = Model2(x, args.savepath)
-        #fdr.gem()
+        x = np.load(os.path.join(args.x_path, 'x_1d.npy'))
+        model = Model2(x, args.savepath, num_cpus)
+
+        dist = np.memmap(os.path.join(args.savepath, 'distance.npy'), dtype='float16', mode='r', shape=(model.size, model.size)).astype(np.float32) # -----------------------------ADD RAY
+        global dist_id
+        dist_id = ray.put(dist)
+
+        model.gem()
+
         params_directory = os.path.join(args.savepath, 'result/params.txt')
         params, pL, sigmaL2, muL = parse_params(params_directory)
-        gamma = fdr.gibb_sampler_nocomp(burn_in=80, n_samples=2000, params=params, pL=pL, sigmaL2=sigmaL2, muL=muL, x=torch.from_numpy(x))
-        label = np.load(os.path.join(args.savepath, 'label/label.npy'))
-        fdr.p_lis(gamma.cpu().numpy(), label)
 
+        start = time.time()
+        gamma = model.gibb_sampler_nocomp(burn_in=100, n_samples=2000, params=params, pL=pL, sigmaL2=sigmaL2, muL=muL, x=x)
+        np.save(os.path.join(args.savepath, 'result/gamma.npy'), gamma)
+        model.p_lis(gamma)
+        end = time.time()
+        print('time elapsed for 2000 gibbs samples: ', end-time)
     ray.shutdown()

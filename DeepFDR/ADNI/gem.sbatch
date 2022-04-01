@@ -10,4 +10,4 @@ module load python/intel/3.8.6
 
 cd /scratch/tk2737/DeepFDR/ADNI
 
-python3.8 gem.py --seed 0 --mode single_label --x_path /scratch/tk2737/ADNI --savepath /scratch/tk2737/ADNI --num_cpus 30
+python3.8 gem.py --seed 0 --mode single_label --x_path /scratch/tk2737/ADNI --savepath /scratch/tk2737/ADNI --num_cpus 25

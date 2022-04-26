@@ -19,8 +19,27 @@ class Model2:
         if not os.path.exists(self.SAVE_DIR):
             os.makedirs(self.SAVE_DIR)
 
-        self.params = np.array([2e-3, 5e-7, 5e-4, 5e-3, 6e-3]).astype(np.float64)
-        self.params_prev = np.array([2e-3, 5e-7, 5e-4, 5e-3, 6e-3]).astype(np.float64)
+        if '005033' in savepath:
+            self.params = np.array([6e-3, 4e-6, 1e-3, 1e-2, 8e-3]).astype(np.float64)
+            self.params_prev = np.array([6e-3, 4e-6, 1e-3, 1e-2, 8e-3]).astype(np.float64)            
+        elif '01003' in savepath:
+            self.params = np.array([6e-3, 4e-6, 8e-4, 8e-3, 7e-3]).astype(np.float64)
+            self.params_prev = np.array([6e-3, 4e-6, 8e-4, 8e-3, 7e-3]).astype(np.float64)  
+        elif '01512' in savepath:
+            self.params = np.array([6e-3, 4e-6, 6e-4, 8e-3, 6e-3]).astype(np.float64)
+            self.params_prev = np.array([6e-3, 4e-6, 6e-4, 8e-3, 6e-3]).astype(np.float64)  
+        elif '02011' in savepath:
+            self.params = np.array([6e-3, 4e-6, 5e-4, 7e-3, 6e-3]).astype(np.float64)
+            self.params_prev = np.array([6e-3, 4e-6, 5e-4, 7e-3, 6e-3]).astype(np.float64)  
+        elif '02496' in savepath:
+            self.params = np.array([2e-3, 5e-7, 5e-4, 5e-3, 6e-3]).astype(np.float64)
+            self.params_prev = np.array([2e-3, 5e-7, 5e-4, 5e-3, 6e-3]).astype(np.float64)
+        elif '02952' in savepath:
+            self.params = np.array([4e-2, 4e-7, 5e-5, 8e-3, 6e-3]).astype(np.float64)
+            self.params_prev = np.array([4e-2, 4e-7, 5e-5, 8e-3, 6e-3]).astype(np.float64)
+        else:
+            self.params = np.array([6e-3, 4e-6, 5e-4, 7e-3, 6e-3]).astype(np.float64)
+            self.params_prev = np.array([6e-3, 4e-6, 5e-4, 7e-3, 6e-3]).astype(np.float64)              
 
         self.pL = np.array([0.5, 0.5])
         self.muL = np.array([-2.5, 1.5])
@@ -32,22 +51,22 @@ class Model2:
         self.const = {'a': 1,  # for penalized likelihood for L >= 2
                       'b': 2,
                       'delta': 1e-3,
-                      'maxIter': 1,
+                      'maxIter': 50,
                       'eps1': 1e-4,
                       'eps2': 0.05,
                       'eps3': 0.02,
                       'eps4': 1e-3,
                       'eps5': 1e-2,
                       'alpha': 1e-3,
-                      'burn_in': 80, # 80
+                      'burn_in': 50, # 80
                       'num_samples': 100, # 100
                       'L': 2,
                       'newton_max': 3,
-                      'fdr_control': 0.1,
+                      'fdr_control': 1e-3,
                       }
 
         self.x = x
-        self.mapping = np.load(os.path.join(args.savepath, '1d_roi_to_3d_mapping.npy'))
+        self.mapping = np.load('1d_roi_to_3d_mapping.npy')
         self.size = self.x.shape[0]
         self.gamma = np.zeros(self.size)  # P(theta | x)
         self.init = np.zeros(self.size)  # initial theta value for gibb's sampling
@@ -197,7 +216,7 @@ class Model2:
         print("time elapsed:", self.end - self.start)
 
     def computeArmijo(self, epoch, max_epochs):
-        lambda_m = 1.0
+        lambda_m = 1e-6
         diff = np.zeros(5)
         count = 0
         satisfied = False
@@ -381,7 +400,6 @@ class Model2:
         # gamma_1 = P(theta = 1 | x) = 1 - LIS
         '''
         gamma_1 = gamma_1.squeeze()
-        print(gamma_1.shape, label.shape)
         dtype = [('index', int), ('value', float)]
         lis = np.zeros(self.size, dtype=dtype)
         for i in range(self.size):
@@ -570,6 +588,48 @@ def parse_params(params_file):
 
     return params, pL, sigmaL2, muL
 
+def get_roi_map():
+    # get ROI region, set background voxels as 0
+    # extract cropped image 
+    roi = nib.load(os.path.join('/scratch/tk2737/ADNI/labels_Neuromorphometrics.nii'))
+    roi_img = np.array(roi.dataobj)
+
+    rois = set()
+    with open(os.path.join('/scratch/tk2737/ADNI/spm_templates.man'), 'r',  encoding="utf8") as file:
+        for i, line in enumerate(file):
+            if i >= 87 and i <= 222:
+                roi_label = int(line.split()[1])
+                rois.add(roi_label)
+
+
+    exclude = {4, 11, 40, 41, 44, 45, 63, 64, 46, 51, 52, 61, 62, 69, 49, 50}
+    rois = rois - exclude
+    for i in range(roi_img.shape[0]):
+        for j in range(roi_img.shape[1]):
+            for k in range(roi_img.shape[2]):
+                if roi_img[i,j,k] in rois:
+                    roi_img[i,j,k] = 1
+                else:
+                    roi_img[i,j,k] = 0
+
+    mins, maxes, count = bound(roi_img)
+    maxes = maxes.astype(int)
+    roi_img = roi_img[mins[0]:maxes[0]+1, mins[1]:maxes[1]+1, mins[2]:maxes[2]+1]
+
+    return roi_img
+
+def get_adni_status():
+    # get list of EMCI and CN files
+    index_AD = []
+    index_CN = []
+    with open(os.path.join('/scratch/tk2737/ADNI/ADNI_FDGPET_subjectID_1536_status.txt'), 'r') as file:
+        for i, line in enumerate(file):
+            if line.split()[1] == 'EMCI':
+                index_AD.append(i-1)
+            elif line.split()[1] == 'CN':
+                index_CN.append(i-1)
+    return index_AD, index_CN
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Test_Statistics Generation')
     parser.add_argument('--seed', type=int)
@@ -578,7 +638,7 @@ if __name__ == "__main__":
     parser.add_argument('--savepath', type=str)
     parser.add_argument('--simulation_path', type=str)
     parser.add_argument('--limit', default=600, type=int)
-    parser.add_argument('--label_path', type=str)
+    parser.add_argument('--labelpath', default='./', type=str)
     parser.add_argument('--num_cpus', type=int)
     args = parser.parse_args()
 
@@ -588,24 +648,28 @@ if __name__ == "__main__":
     mode = args.mode
 
     np.random.seed(rng_seed)
-    numba.set_num_threads(int(numba.config.NUMBA_NUM_THREADS))
+    numba.set_num_threads(30)
 
-    num_cpus = args.num_cpus
-
+    #num_cpus = args.num_cpus
+    num_cpus = 4
     ray.init(num_cpus=num_cpus)
+
+    x = np.load(os.path.join(args.x_path, 'x_1d.npy'))
+    model = Model2(x, args.savepath, num_cpus)
+    dist = np.memmap('distance.npy', dtype='float16', mode='r', shape=(model.size, model.size)).astype(np.float32) # -----------------------------ADD RAY
+    global dist_id
+    dist_id = ray.put(dist)
 
     if mode == "label_gen": 
         npzfile = np.load(os.path.join(args.x_path, 'data.npz'))
-        fdr = Model2(npzfile['arr_0'][0], args.savepath)
-        label_npzarray = np.empty((npzfile['arr_0'].shape[0], 30, 30, 30))
+        label_npzarray = np.empty((npzfile['arr_0'].shape[0], npzfile['arr_0'].shape[1]))
         params_directory = os.path.join(args.savepath, 'result/params.txt')
         params, pL, sigmaL2, muL = parse_params(params_directory)
 
         for i in range(limit):        
-            x = torch.from_numpy(npzfile['arr_0'][num_files_per_section*rng_seed + i])
+            x = npzfile['arr_0'][num_files_per_section*rng_seed + i]
             # burn_in = 80, n_samples = 2000 for simulation
-            gamma = fdr.gibb_sampler_nocomp(burn_in=100, n_samples=2000, params=params, pL=pL, sigmaL2=sigmaL2, muL=muL, x=x)
-            label_npzarray[num_files_per_section*rng_seed + i] = gamma.cpu().numpy()            
+            label_npzarray[num_files_per_section*rng_seed + i] = model.gibb_sampler_nocomp(burn_in=100, n_samples=2000, params=params, pL=pL, sigmaL2=sigmaL2, muL=muL, x=x)
 
         train_label_directory = os.path.join(args.x_path, 'label.npz') 
         if not os.path.exists(train_label_directory):
@@ -617,13 +681,6 @@ if __name__ == "__main__":
             np.savez(train_label_directory, orig_data)
             
     elif mode == "single_label":
-        x = np.load(os.path.join(args.x_path, 'x_1d.npy'))
-        model = Model2(x, args.savepath, num_cpus)
-
-        dist = np.memmap(os.path.join(args.savepath, 'distance.npy'), dtype='float16', mode='r', shape=(model.size, model.size)).astype(np.float32) # -----------------------------ADD RAY
-        global dist_id
-        dist_id = ray.put(dist)
-
         model.gem()
 
         params_directory = os.path.join(args.savepath, 'result/params.txt')
@@ -632,7 +689,46 @@ if __name__ == "__main__":
         start = time.time()
         gamma = model.gibb_sampler_nocomp(burn_in=100, n_samples=2000, params=params, pL=pL, sigmaL2=sigmaL2, muL=muL, x=x)
         np.save(os.path.join(args.savepath, 'result/gamma.npy'), gamma)
-        model.p_lis(gamma)
+
+        label = np.ravel(np.load(args.labelpath))
+        model.p_lis(gamma, label)
         end = time.time()
-        print('time elapsed for 2000 gibbs samples: ', end-time)
+        print('time elapsed for 2000 gibbs samples: ', end-start)
+
+    elif mode == "real_data":
+        model.gem()
+
+        params_directory = os.path.join(args.savepath, 'result/params.txt')
+        params, pL, sigmaL2, muL = parse_params(params_directory)
+
+        gamma = model.gibb_sampler_nocomp(burn_in=50, n_samples=100, params=params, pL=pL, sigmaL2=sigmaL2, muL=muL, x=x)
+        np.save(os.path.join(args.savepath, 'result/gamma.npy'), gamma)
+
+        label = np.ravel(np.load(args.labelpath))
+        model.p_lis(gamma)
+
+        roi_map = get_roi_map()
+        index_AD, index_CN = get_adni_status()
+
+        signal_1d = np.load(os.path.join(self.SAVE_DIR, 'lis.npy'))
+        print('num_signals: ', np.count_nonzero(signal_1d))
+
+        signal_full = np.zeros(roi_map.shape)
+        index = 0
+        for i in range(roi_map.shape[0]):
+            for j in range(roi_map.shape[1]):
+                for k in range(roi_map.shape[2]):
+                    if roi_map[i,j,k]:
+                        signal_full[i,j,k] = signal_1d[index]
+                        index += 1
+
+        np.save(os.path.join(self.SAVE_DIR, 'lis_3d.npy'), signal_full)
+
+
+        roi_img = np.memmap(os.path.join(self.SAVE_DIR, 'EMCI', 'EMCI.npy'),  dtype='float64', mode='r', shape=(len(index_AD), roi_map.shape[0], roi_map.shape[1], roi_map.shape[2]))[0] 
+
+        cropped = nib.Nifti1Image(bh_signals*roi_img, np.eye(4))
+        cropped.header.get_xyzt_units()
+        cropped.to_filename(os.path.join(self.SAVE_DIR, 'result/gem.nii'))
+
     ray.shutdown()

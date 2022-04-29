@@ -163,6 +163,347 @@ def get_roi_map():
 
 	return roi_img
 
+def get_index_to_crop_original_image():
+	# get ROI region, set background voxels as 0
+	# extract cropped image 
+	roi = nib.load(os.path.join(root, 'labels_Neuromorphometrics.nii'))
+	roi_img = np.array(roi.dataobj)
+
+	rois = set()
+	with open(os.path.join(root, 'spm_templates.man'), 'r') as file:
+		for i, line in enumerate(file):
+			if i >= 87 and i <= 222:
+				roi_label = int(line.split()[1])
+				rois.add(roi_label)
+
+
+	exclude = {4, 11, 40, 41, 44, 45, 63, 64, 46, 51, 52, 61, 62, 69, 49, 50}
+	rois = rois - exclude
+	for i in range(roi_img.shape[0]):
+		for j in range(roi_img.shape[1]):
+			for k in range(roi_img.shape[2]):
+				if roi_img[i,j,k] in rois:
+					roi_img[i,j,k] = 1
+				else:
+					roi_img[i,j,k] = 0
+
+	mins, maxes, count = bound(roi_img)
+	maxes = maxes.astype(int)
+	roi_img = roi_img[mins[0]:maxes[0]+1, mins[1]:maxes[1]+1, mins[2]:maxes[2]+1]
+
+	return mins, maxes
+
+def get_individual_roi():
+	# get ROI region, set background voxels as 0
+	# extract cropped image 
+	roi = nib.load(os.path.join(root, 'labels_Neuromorphometrics.nii'))
+	roi_img = np.array(roi.dataobj)
+	roi_img_change = np.array(roi.dataobj)
+
+	rois = set()
+	with open(os.path.join(root, 'spm_templates.man'), 'r') as file:
+		for i, line in enumerate(file):
+			if i >= 87 and i <= 222:
+				roi_label = int(line.split()[1])
+				rois.add(roi_label)
+
+
+	exclude = {4, 11, 40, 41, 44, 45, 63, 64, 46, 51, 52, 61, 62, 69, 49, 50}
+	rois = rois - exclude
+	
+
+	###get bound
+	for i in range(roi_img.shape[0]):
+		for j in range(roi_img.shape[1]):
+			for k in range(roi_img.shape[2]):
+				if roi_img[i,j,k] in rois:
+					roi_img_change[i,j,k] = 1
+				else:
+					roi_img_change[i,j,k] = 0
+
+	mins, maxes, count = bound(roi_img_change)
+	maxes = maxes.astype(int)
+	roi_img = roi_img[mins[0]:maxes[0]+1, mins[1]:maxes[1]+1, mins[2]:maxes[2]+1] #now roi img is bounded with label value
+	###
+	'''
+	#create a map with roi dimension (94, 119, 98) for each region, only voxel in this region is 1
+	#other voxel 0
+	for a in rois:
+		roi_in = np.zeros((roi_img.shape))
+
+		for i in range(roi_img.shape[0]):
+			for j in range(roi_img.shape[1]):
+				for k in range(roi_img.shape[2]):
+					if roi_img[i,j,k] == a:
+
+						roi_in[i,j,k] = 1
+
+		roi_in = roi_in[mins[0]:maxes[0]+1, mins[1]:maxes[1]+1, mins[2]:maxes[2]+1]
+		print(roi_in.shape)
+		np.save("./individual_roi_3d_map/individual_roi_"+str(a)+".npy", roi_in)
+	'''
+	#use the map to obtain test statistics, 3d (94, 119, 98) with test stat
+	#1d only roi voxel for this region
+	
+	x = np.load('x_3d.npy')
+	for a in rois:
+		index = 0
+		roi_in = np.load("./individual_roi_3d_map/individual_roi_"+str(a)+".npy") #94, 119, 98
+		x_roi_in = roi_in * x #94, 119, 98
+		num_one = np.count_nonzero(roi_in) 
+		xyz = np.zeros((num_one, 3))
+		roi_in_1d = np.zeros(num_one)
+		for i in range(roi_img.shape[0]):
+			for j in range(roi_img.shape[1]):
+				for k in range(roi_img.shape[2]):
+					if roi_img[i,j,k] == a:
+						xyz[index]=np.array([i,j,k])
+						roi_in_1d[index] = x_roi_in[i,j,k]
+						index += 1
+		np.save("./individual_roi_3d_test_stat/individual_roi_3d_test_stat_"+str(a)+".npy", x_roi_in)
+		np.save("./individual_roi_xyz/individual_roi_xyz_"+str(a)+".npy", xyz)				
+		np.save("./individual_roi_1d_test_stat/individual_roi_1d_test_stat_"+str(a)+".npy", roi_in_1d)
+
+
+def get_individual_dist():
+	# get ROI region, set background voxels as 0
+	# extract cropped image 
+	roi = nib.load(os.path.join(root, 'labels_Neuromorphometrics.nii'))
+	roi_img = np.array(roi.dataobj)
+	roi_img_change = np.array(roi.dataobj)
+
+	rois = set()
+	with open(os.path.join(root, 'spm_templates.man'), 'r') as file:
+		for i, line in enumerate(file):
+			if i >= 87 and i <= 222:
+				roi_label = int(line.split()[1])
+				rois.add(roi_label)
+
+
+	exclude = {4, 11, 40, 41, 44, 45, 63, 64, 46, 51, 52, 61, 62, 69, 49, 50}
+	rois = rois - exclude
+	
+
+	###get bound
+	for i in range(roi_img_change.shape[0]):
+		for j in range(roi_img_change.shape[1]):
+			for k in range(roi_img_change.shape[2]):
+				if roi_img_change[i,j,k] not in rois:
+					roi_img_change[i,j,k] = 0
+			
+
+	mins, maxes, count = bound(roi_img_change)
+	maxes = maxes.astype(int)
+	roi_img_change = roi_img_change[mins[0]:maxes[0]+1, mins[1]:maxes[1]+1, mins[2]:maxes[2]+1] #now roi img is bounded with label value
+
+	
+
+	roi_map = get_roi_map()
+	num_rois = np.count_nonzero(roi_map)
+
+	dist = np.memmap(os.path.join(root,'distance.npy'), dtype='float16', mode='r+', shape=(num_rois,num_rois))
+
+	
+	index = 0
+	label_1d = np.zeros(num_rois)
+	for i in range(roi_map.shape[0]):
+		for j in range(roi_map.shape[1]):
+			for k in range(roi_map.shape[2]):
+				if roi_img_change[i,j,k] != 0:
+				
+					label_1d[index] = roi_img_change[i,j,k]
+					index += 1
+
+	print("label_1d.shape")				
+	print(label_1d.shape)
+	#now we have 1d rois with values indicating region
+
+	for a in rois:
+		index = 0
+		roi_in = np.load("./individual_roi_3d_map/individual_roi_"+str(a)+".npy") #94, 119, 98
+		num_one = np.count_nonzero(roi_in) 
+		a_roi_indice = np.zeros(num_one)
+		for i in range(label_1d.shape[0]):
+			if label_1d[i] == a:
+				a_roi_indice[index] = i
+				index +=1 
+			
+		a_roi_indice = a_roi_indice.astype(int)
+
+		np.save("./individual_roi_dist/individual_roi_dist_"+str(a)+".npy", np.empty((num_one, num_one), dtype=np.float16))
+
+		dist_a = np.memmap("./individual_roi_dist/individual_roi_dist_"+str(a)+".npy", dtype='float16', mode='r+', shape=(num_one, num_one)) # write to here
+
+		for p in range(num_one):
+			p_in = a_roi_indice[p]
+			for l in range(num_one):
+				l_in = a_roi_indice[l]
+				dist_a[p,l] = dist[p_in, l_in]
+
+		print(dist_a.shape)
+
+		dist_a.flush()
+		
+
+def get_individual_corr_CN():
+	# get ROI region, set background voxels as 0
+	# extract cropped image 
+	roi = nib.load(os.path.join(root, 'labels_Neuromorphometrics.nii'))
+	roi_img = np.array(roi.dataobj)
+	roi_img_change = np.array(roi.dataobj)
+
+	rois = set()
+	with open(os.path.join(root, 'spm_templates.man'), 'r') as file:
+		for i, line in enumerate(file):
+			if i >= 87 and i <= 222:
+				roi_label = int(line.split()[1])
+				rois.add(roi_label)
+
+
+	exclude = {4, 11, 40, 41, 44, 45, 63, 64, 46, 51, 52, 61, 62, 69, 49, 50}
+	rois = rois - exclude
+	
+
+	###get bound
+	for i in range(roi_img_change.shape[0]):
+		for j in range(roi_img_change.shape[1]):
+			for k in range(roi_img_change.shape[2]):
+				if roi_img_change[i,j,k] not in rois:
+					roi_img_change[i,j,k] = 0
+			
+
+	mins, maxes, count = bound(roi_img_change)
+	maxes = maxes.astype(int)
+	roi_img_change = roi_img_change[mins[0]:maxes[0]+1, mins[1]:maxes[1]+1, mins[2]:maxes[2]+1] #now roi img is bounded with label value
+
+	
+
+	roi_map = get_roi_map()
+	num_rois = np.count_nonzero(roi_map)
+
+	dist = np.memmap("/scratch/qj2022/ADNI_PET/corr_precompute_CN/correlation_CN_all.npy", dtype='float16', mode='r+', shape=(num_rois,num_rois))
+
+	
+	index = 0
+	label_1d = np.zeros(num_rois)
+	for i in range(roi_map.shape[0]):
+		for j in range(roi_map.shape[1]):
+			for k in range(roi_map.shape[2]):
+				if roi_img_change[i,j,k] != 0:
+				
+					label_1d[index] = roi_img_change[i,j,k]
+					index += 1
+
+	print("label_1d.shape")				
+	print(label_1d.shape)
+	#now we have 1d rois with values indicating region
+
+	for a in rois:
+		index = 0
+		roi_in = np.load("./individual_roi_3d_map/individual_roi_"+str(a)+".npy") #94, 119, 98
+		num_one = np.count_nonzero(roi_in) 
+		a_roi_indice = np.zeros(num_one)
+		for i in range(label_1d.shape[0]):
+			if label_1d[i] == a:
+				a_roi_indice[index] = i
+				index +=1 
+			
+		a_roi_indice = a_roi_indice.astype(int)
+
+		np.save("./individual_roi_corr_CN/individual_roi_corr_CN_"+str(a)+".npy", np.empty((num_one, num_one), dtype=np.float16))
+
+		dist_a = np.memmap("./individual_roi_corr_CN/individual_roi_corr_CN_"+str(a)+".npy", dtype='float16', mode='r+', shape=(num_one, num_one)) # write to here
+
+		for p in range(num_one):
+			p_in = a_roi_indice[p]
+			for l in range(num_one):
+				l_in = a_roi_indice[l]
+				dist_a[p,l] = dist[p_in, l_in]
+
+		print(dist_a.shape)
+
+		dist_a.flush()
+		
+
+def get_individual_corr_AD():
+	# get ROI region, set background voxels as 0
+	# extract cropped image 
+	roi = nib.load(os.path.join(root, 'labels_Neuromorphometrics.nii'))
+	roi_img = np.array(roi.dataobj)
+	roi_img_change = np.array(roi.dataobj)
+
+	rois = set()
+	with open(os.path.join(root, 'spm_templates.man'), 'r') as file:
+		for i, line in enumerate(file):
+			if i >= 87 and i <= 222:
+				roi_label = int(line.split()[1])
+				rois.add(roi_label)
+
+
+	exclude = {4, 11, 40, 41, 44, 45, 63, 64, 46, 51, 52, 61, 62, 69, 49, 50}
+	rois = rois - exclude
+	
+
+	###get bound
+	for i in range(roi_img_change.shape[0]):
+		for j in range(roi_img_change.shape[1]):
+			for k in range(roi_img_change.shape[2]):
+				if roi_img_change[i,j,k] not in rois:
+					roi_img_change[i,j,k] = 0
+			
+
+	mins, maxes, count = bound(roi_img_change)
+	maxes = maxes.astype(int)
+	roi_img_change = roi_img_change[mins[0]:maxes[0]+1, mins[1]:maxes[1]+1, mins[2]:maxes[2]+1] #now roi img is bounded with label value
+
+	
+
+	roi_map = get_roi_map()
+	num_rois = np.count_nonzero(roi_map)
+
+	dist = np.memmap("/scratch/qj2022/ADNI_PET/corr_precompute_AD/correlation_AD_all.npy", dtype='float16', mode='r+', shape=(num_rois,num_rois))
+
+	
+	index = 0
+	label_1d = np.zeros(num_rois)
+	for i in range(roi_map.shape[0]):
+		for j in range(roi_map.shape[1]):
+			for k in range(roi_map.shape[2]):
+				if roi_img_change[i,j,k] != 0:
+				
+					label_1d[index] = roi_img_change[i,j,k]
+					index += 1
+
+	print("label_1d.shape")				
+	print(label_1d.shape)
+	#now we have 1d rois with values indicating region
+
+	for a in rois:
+		index = 0
+		roi_in = np.load("./individual_roi_3d_map/individual_roi_"+str(a)+".npy") #94, 119, 98
+		num_one = np.count_nonzero(roi_in) 
+		a_roi_indice = np.zeros(num_one)
+		for i in range(label_1d.shape[0]):
+			if label_1d[i] == a:
+				a_roi_indice[index] = i
+				index +=1 
+			
+		a_roi_indice = a_roi_indice.astype(int)
+
+		np.save("./individual_roi_corr_AD/individual_roi_corr_AD_"+str(a)+".npy", np.empty((num_one, num_one), dtype=np.float16))
+
+		dist_a = np.memmap("./individual_roi_corr_AD/individual_roi_corr_AD_"+str(a)+".npy", dtype='float16', mode='r+', shape=(num_one, num_one)) # write to here
+
+		for p in range(num_one):
+			p_in = a_roi_indice[p]
+			for l in range(num_one):
+				l_in = a_roi_indice[l]
+				dist_a[p,l] = dist[p_in, l_in]
+
+		print(dist_a.shape)
+
+		dist_a.flush()
+
 def get_adni_status():
 	# get list of EMCI and CN files
 	index_AD = []
@@ -239,46 +580,35 @@ def test_statistic():
 	np.save(os.path.join(root,'x_3d.npy'), test_statistic)
 	np.save(os.path.join(root,'p_value.npy'), p_value)
 
-def corr_precompute_AD():
+def plot_cropped_raw_image():
+	"""
+	Compute t-value using Welch's t-test.
+	Then t-value and v are put into the t-distribution’s cdf to get G(t)
+	Then inverse cdf of standard Gaussian is used to convert it to z-value.
+	We use z-value because we assume the standard Gaussian for the null distribution.
 
+	Use p-value returned from https://docs.scipy.org/doc/scipy/reference/generated/scipy.stats.ttest_ind.html for bh and q-value methods
+	"""
 	roi_map = get_roi_map()
 	index_AD, index_CN = get_adni_status()
-	num_rois = np.count_nonzero(roi_map)
-	AD = np.memmap(os.path.join(root, 'EMCI', 'EMCI.npy'),  dtype='float64', mode='r', shape=(len(index_AD)-1, num_rois))
+	#mins, maxes = get_index_to_crop_original_image()
 
+	AD = np.memmap(os.path.join(root, 'EMCI', 'EMCI.npy'),  dtype='float64', mode='r', shape=(len(index_AD)-1, roi_map.shape[0], roi_map.shape[1], roi_map.shape[2])) 
+	CN = np.memmap(os.path.join(root, 'CN', 'CN.npy'),  dtype='float64', mode='r', shape=(len(index_CN)-1, roi_map.shape[0], roi_map.shape[1], roi_map.shape[2])) 
+
+	AD_3 = AD[3]
 	
-	np.save(os.path.join(root,'correlation_AD.npy'), np.empty((num_rois, num_rois), dtype=np.float16))
-
-	corr = np.memmap(os.path.join(root,'correlation_AD.npy'), dtype='float16', mode='r+', shape=(num_rois,num_rois)) # write to here
-
-	for i in range(num_rois):
-		AD_i = AD[:,i]
-		for j in range(num_rois):
-			AD_j = AD[:,j]
-			corr[i] = np.corrcoef(AD_i,AD_j)[1,0].astype(np.float16)
-
-	corr.flush()
-
-def corr_precompute_CN():
 	
-	roi_map = get_roi_map()
-	index_AD, index_CN = get_adni_status()
-	num_rois = np.count_nonzero(roi_map)
-	CN = np.memmap(os.path.join(root, 'CN', 'CN.npy'),  dtype='float64', mode='r', shape=(len(index_CN)-1, num_rois)) 
+	cropped = nib.Nifti1Image(AD_3, np.eye(4))
+	cropped.header.get_xyzt_units()
+	cropped.to_filename('./AD_3_Raw_Image.nii')	
 
+	CN_3 = CN[3]
 
-	
-	np.save(os.path.join(root,'correlation_CN.npy'), np.empty((num_rois, num_rois), dtype=np.float16))
+	cropped = nib.Nifti1Image(CN_3, np.eye(4))
+	cropped.header.get_xyzt_units()
+	cropped.to_filename('./CN_3_Raw_Image.nii')	
 
-	corr = np.memmap(os.path.join(root,'correlation_CN.npy'), dtype='float16', mode='r+', shape=(num_rois,num_rois)) # write to here
-
-	for i in range(num_rois):
-		CN_i = CN[:,i]
-		for j in range(num_rois):
-			CN_j = CN[:,j]
-			corr[i] = np.corrcoef(CN_i,CN_j)[1,0].astype(np.float16)
-
-	corr.flush()
 
 def test_p_value(p_value, threshold):
 	pv = np.ravel(p_value)
@@ -472,18 +802,21 @@ def precompute_distance_matrix():
 	
 if __name__ == '__main__':
 	start = time.time()
-    
+	#get_individual_dist()
+	get_individual_corr_CN()
+	'''
+
 	setup()
 	preprocess()
 	test_statistic()
 	precompute_distance_matrix()
-
+	
 	
 	roi_map = get_roi_map()
 	index_AD, index_CN = get_adni_status()
 	roi_img = get_roi_map()
 
-
+	
 	x = np.load(os.path.join(root, 'p_value.npy'))
 
 	print(np.count_nonzero(roi_map))
@@ -505,8 +838,9 @@ if __name__ == '__main__':
 	cropped.header.get_xyzt_units()
 	cropped.to_filename('./p.nii')	
 
-	
+	'''
 	
 
 
 	print("time elapsed: ", time.time() - start)
+

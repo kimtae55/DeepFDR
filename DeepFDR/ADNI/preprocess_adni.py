@@ -16,7 +16,7 @@ import numpy as np
 
 WikiWelchResult = namedtuple('WikiWelchResult', ('statistic', 'df'))
 
-root = '/scratch/tk2737/ADNI'
+root = 'D:/Documents/2020/NYU/Research/Code/data'
 
 @njit(parallel=True, nogil=True, cache=True)
 def bound(volume):  
@@ -51,8 +51,8 @@ def bound(volume):
 
 def setup():
 	with np.printoptions(threshold=np.inf):
-		preprocessed_AD = os.path.join(root, 'EMCI')
-		preprocessed_CN = os.path.join(root, 'CN')
+		preprocessed_AD = root + '/EMCI'
+		preprocessed_CN = root + '/CN'
 		if not os.path.exists(preprocessed_CN):
 			os.makedirs(preprocessed_CN)
 
@@ -66,8 +66,8 @@ def setup():
 		mins, maxes, count = bound(roi_img)
 		maxes = maxes.astype(int)
 
-		np.save(os.path.join(preprocessed_AD, 'EMCI.npy'), np.empty((len(index_AD), maxes[0] + 1 - mins[0], maxes[1] + 1 - mins[1], maxes[2] + 1 - mins[2])))
-		np.save(os.path.join(preprocessed_CN, 'CN.npy'), np.empty((len(index_CN), maxes[0] + 1 - mins[0], maxes[1] + 1 - mins[1], maxes[2] + 1 - mins[2])))
+		np.save(preprocessed_AD + '/EMCI.npy', np.empty((len(index_AD), roi_img.shape[0], roi_img.shape[1], roi_img.shape[2])))
+		np.save(preprocessed_CN + '/CN.npy', np.empty((len(index_CN), roi_img.shape[0], roi_img.shape[1], roi_img.shape[2])))
 
 def preprocess():
 	'''
@@ -81,9 +81,8 @@ def preprocess():
 	'''
 	start = time.time()
 
-	preprocessed_AD = os.path.join(root, 'EMCI')
-	preprocessed_CN = os.path.join(root, 'CN')
-
+	preprocessed_AD = root + '/EMCI'
+	preprocessed_CN = root + '/CN'
 	index_AD, index_CN = get_adni_status()
 
 	roi_img = get_roi_map()
@@ -91,18 +90,17 @@ def preprocess():
 	maxes = maxes.astype(int)
 	custom_start = 6
 
-	saveimg = np.memmap(os.path.join(preprocessed_AD, 'EMCI.npy'), dtype='float64', mode='r+', shape=(len(index_AD), maxes[0]-mins[0]+1, maxes[1]-mins[1]+1, maxes[2]-mins[2]+1)) # write to here
+	saveimg = np.memmap(preprocessed_AD + '/EMCI.npy', dtype='float64', mode='r+', shape=(len(index_AD), roi_img.shape[0], roi_img.shape[1], roi_img.shape[2])) # write to here
 	cur = 0
 	for index in index_AD:
 		if index > custom_start:
-			img = np.load(os.path.join(root, 'ADNI_FDGPET_Clinica_pet-volume_1536.npy'), mmap_mode='r')[index]
+			img = np.load(root + '/ADNI_FDGPET_Clinica_pet-volume_1536.npy', mmap_mode='r')[index]
 			preprocessed_img = img.copy()
 			for x in range(roi_img.shape[0]):
 				for y in range(roi_img.shape[1]):
 					for z in range(roi_img.shape[2]):
 						if not roi_img[x,y,z]:
 							preprocessed_img[x,y,z] = 0	
-			preprocessed_img = preprocessed_img[mins[0]:maxes[0]+1, mins[1]:maxes[1]+1, mins[2]:maxes[2]+1]
 			saveimg[cur] = preprocessed_img
 
 			print("Time: " + str(cur) + ", " + str(time.time() - start), end='\r')
@@ -111,19 +109,18 @@ def preprocess():
 	saveimg.flush()
 
 	
-	saveimg = np.memmap(os.path.join(preprocessed_CN, 'CN.npy'), dtype='float64', mode='r+', shape=(len(index_CN),maxes[0]-mins[0]+1, maxes[1]-mins[1]+1, maxes[2]-mins[2]+1)) # write to here
+	saveimg = np.memmap(preprocessed_CN + '/CN.npy', dtype='float64', mode='r+', shape=(len(index_CN),roi_img.shape[0], roi_img.shape[1], roi_img.shape[2])) # write to here
 
 	cur = 0
 	for index in index_CN:
 		if index > custom_start:
-			img = np.load(os.path.join(root, 'ADNI_FDGPET_Clinica_pet-volume_1536.npy'), mmap_mode='r')[index]
+			img = np.load(root + '/ADNI_FDGPET_Clinica_pet-volume_1536.npy', mmap_mode='r')[index]
 			preprocessed_img = img.copy()
 			for x in range(roi_img.shape[0]):
 				for y in range(roi_img.shape[1]):
 					for z in range(roi_img.shape[2]):
 						if not roi_img[x,y,z]:
 							preprocessed_img[x,y,z] = 0				
-			preprocessed_img = preprocessed_img[mins[0]:maxes[0]+1, mins[1]:maxes[1]+1, mins[2]:maxes[2]+1]
 			saveimg[cur] = preprocessed_img
 			print("Time: " + str(cur) + ", " + str(time.time() - start), end='\r')
 			cur += 1
@@ -133,11 +130,11 @@ def preprocess():
 def get_roi_map():
 	# get ROI region, set background voxels as 0
 	# extract cropped image 
-	roi = nib.load(os.path.join(root, 'labels_Neuromorphometrics.nii'))
+	roi = nib.load(root + '/labels_Neuromorphometrics.nii')
 	roi_img = np.array(roi.dataobj)
 
 	rois = set()
-	with open(os.path.join(root, 'spm_templates.man'), 'r') as file:
+	with open(root + '/spm_templates.man', 'r',  encoding="utf8") as file:
 		for i, line in enumerate(file):
 			if i >= 87 and i <= 222:
 				roi_label = int(line.split()[1])
@@ -156,7 +153,7 @@ def get_roi_map():
 
 	mins, maxes, count = bound(roi_img)
 	maxes = maxes.astype(int)
-	roi_img = roi_img[mins[0]:maxes[0]+1, mins[1]:maxes[1]+1, mins[2]:maxes[2]+1]
+	#roi_img = roi_img[mins[0]:maxes[0]+1, mins[1]:maxes[1]+1, mins[2]:maxes[2]+1]
 
 	return roi_img
 
@@ -164,7 +161,7 @@ def get_adni_status():
 	# get list of EMCI and CN files
 	index_AD = []
 	index_CN = []
-	with open(os.path.join(root, 'ADNI_FDGPET_subjectID_1536_status.txt'), 'r') as file:
+	with open(root + '/ADNI_FDGPET_subjectID_1536_status.txt', 'r') as file:
 		for i, line in enumerate(file):
 			if line.split()[1] == 'EMCI':
 				index_AD.append(i-1)
@@ -214,10 +211,12 @@ def test_statistic():
 	Use p-value returned from https://docs.scipy.org/doc/scipy/reference/generated/scipy.stats.ttest_ind.html for bh and q-value methods
 	"""
 	roi_map = get_roi_map()
+	mins, maxes, count = bound(roi_map)
+	maxes = maxes.astype(int)
 	index_AD, index_CN = get_adni_status()
 
-	AD = np.memmap(os.path.join(root, 'EMCI', 'EMCI.npy'),  dtype='float64', mode='r', shape=(len(index_AD), roi_map.shape[0], roi_map.shape[1], roi_map.shape[2])) 
-	CN = np.memmap(os.path.join(root, 'CN', 'CN.npy'),  dtype='float64', mode='r', shape=(len(index_CN), roi_map.shape[0], roi_map.shape[1], roi_map.shape[2])) 
+	AD = np.memmap(root + '/EMCI/EMCI.npy',  dtype='float64', mode='r', shape=(len(index_AD), roi_map.shape[0], roi_map.shape[1], roi_map.shape[2])) 
+	CN = np.memmap(root + '/CN/CN.npy',  dtype='float64', mode='r', shape=(len(index_CN), roi_map.shape[0], roi_map.shape[1], roi_map.shape[2])) 
 
 	test_statistic = np.zeros(AD.shape[1:])
 	p_value = np.zeros(AD.shape[1:])
@@ -233,6 +232,8 @@ def test_statistic():
 					p_value[i,j,k] = scipy.stats.ttest_ind(AD_i, CN_i, equal_var=False).pvalue
 					test_statistic[i,j,k] = z
 
+	test_statistic = test_statistic[mins[0]:maxes[0]+1, mins[1]:maxes[1]+1, mins[2]:maxes[2]+1]
+	p_value = p_value[mins[0]:maxes[0]+1, mins[1]:maxes[1]+1, mins[2]:maxes[2]+1]
 	np.save(os.path.join(root,'x_3d.npy'), test_statistic)
 	np.save(os.path.join(root,'p_value.npy'), p_value)
 
@@ -364,7 +365,7 @@ def d_ij(x, y, z, i, j, k):
     # USE THIS FOR THE CODE
     #return float32(1.0) / (float32(1.0) + (((z - k) ** 2 + (y - j) ** 2 + (x - i) ** 2)**float32(0.5)))
 
-def precompute_distance_matrix():
+def precompute_distance_matrix(has_roi=True):
 	"""
 	We will use np.memmap since the seeks are simple, so its performance will be similar to that of pytables or h5py
 
@@ -379,8 +380,15 @@ def precompute_distance_matrix():
 	Parameters:
 	root - root directory of datapath (where it contains all ADNI related files)
 	"""
-	test_statistic = np.load(os.path.join(root, 'x_3d.npy'))
-	roi_map = get_roi_map()
+	test_statistic = np.load(root + '/x_3d.npy')
+
+	roi_map = np.ones((30,30,30))
+	if has_roi:
+		roi_map = get_roi_map()
+		mins, maxes, count = bound(roi_map)
+		maxes = maxes.astype(int)
+		roi_map = roi_map[mins[0]:maxes[0]+1, mins[1]:maxes[1]+1, mins[2]:maxes[2]+1]
+
 	num_rois = np.count_nonzero(roi_map)
 
 	index = 0
@@ -396,42 +404,67 @@ def precompute_distance_matrix():
 
 	# now I have the x,y,z coordinate for all roi voxels, and also the corresponding test_statistics for p voxels 
 	# save this so that I can use it for mapping later 
+	
 	print("num_voxels: ", test_statistic_1d.shape)
-	np.save(os.path.join(root, '1d_roi_to_3d_mapping.npy'), xyz)
-	np.save(os.path.join(root, 'x_1d.npy'), test_statistic_1d)
+	np.save(root + '/1d_roi_to_3d_mapping.npy', xyz)
+	np.save(root + '/x_1d.npy', test_statistic_1d)
 	
 	# use the below snippet when computing the distance
 	
-	np.save(os.path.join(root, 'distance.npy'), np.empty((num_rois, num_rois), dtype=np.float16))
+	'''
+	np.save(root + '/distance.npy', np.empty((num_rois, num_rois), dtype=np.float16))
 
-	dist = np.memmap(os.path.join(root, 'distance.npy'), dtype='float16', mode='r+', shape=(num_rois,num_rois)) # write to here
+	dist = np.memmap(root + '/distance.npy', dtype='float16', mode='r+', shape=(num_rois,num_rois)) # write to here
 
 	for index in range(num_rois):
 	    dist[index] = d_ij(xyz[:,0], xyz[:,1], xyz[:,2], xyz[index,0], xyz[index,1], xyz[index,2]).astype(np.float16)
 
 	dist.flush()
-	
+	'''
+
 if __name__ == '__main__':
 	start = time.time()
 
 	#setup()
 	#preprocess()
 	#test_statistic()
-	precompute_distance_matrix()
+	#precompute_distance_matrix()
+	
+	
+	mapping = np.load(root + '/1d_roi_to_3d_mapping.npy')
 
-	'''
 	roi_map = get_roi_map()
 	index_AD, index_CN = get_adni_status()
-	roi = nib.load('/Users/taehyo/Documents/NYU/Research/DeepFDR/cHMRF/roi.nii')
-	roi_img = np.array(roi.dataobj)
-	x = np.load('/Users/taehyo/Dropbox/NYU/Research/Research/Code/data/ADNI/ADNI/p_value.npy')
+	roi_img = np.memmap(os.path.join(root, 'EMCI', 'EMCI.npy'),  dtype='float64', mode='r', shape=(len(index_AD), roi_map.shape[0], roi_map.shape[1], roi_map.shape[2]))[0] 
+	
+	x = np.load(root + '/p_value.npy')
 
 	bh_signals = find_signals_bh(x, 1e-3)
-	q_signals = find_signals_q(x, 1e-3)
+	q_signals = find_signals_q(x, 1e-3) # use 2e-3 for ~10% signals, 7e-3 for ~20% signals
 	p_signals = test_p_value(x, 1e-3)
 
-	irrelevant = roi_img.shape[0] * roi_img.shape[1] * roi_img.shape[2] - np.count_nonzero(roi_map)
-	print(np.count_nonzero(bh_signals)-irrelevant, np.count_nonzero(q_signals)-irrelevant, np.count_nonzero(p_signals)-irrelevant)
+	'''
+    signal_full = np.zeros(roi_map.shape)
+    index = 0
+    for i in range(roi_map.shape[0]):
+        for j in range(roi_map.shape[1]):
+            for k in range(roi_map.shape[2]):
+                if roi_map[i,j,k]:
+                    signal_full[i,j,k] = signal_1d[index]
+                    index += 1
+	'''
+	mins, maxes, count = bound(roi_map)
+	maxes = maxes.astype(int)
+	roi_map = roi_map[mins[0]:maxes[0]+1, mins[1]:maxes[1]+1, mins[2]:maxes[2]+1]
+	roi_img = roi_img[mins[0]:maxes[0]+1, mins[1]:maxes[1]+1, mins[2]:maxes[2]+1]
+
+	print(roi_map.shape)
+	print(bh_signals.shape)
+	print(np.count_nonzero(roi_map))
+	print(np.count_nonzero(bh_signals*roi_map))
+	print(np.count_nonzero(q_signals*roi_map))
+	print(np.count_nonzero(p_signals*roi_map))
+
 	cropped = nib.Nifti1Image(bh_signals*roi_img, np.eye(4))
 	cropped.header.get_xyzt_units()
 	cropped.to_filename('./bh.nii')
@@ -443,21 +476,22 @@ if __name__ == '__main__':
 	cropped = nib.Nifti1Image(p_signals*roi_img, np.eye(4))
 	cropped.header.get_xyzt_units()
 	cropped.to_filename('./p.nii')	
-	'''
+
+	cropped = nib.Nifti1Image(roi_img, np.eye(4))
+	cropped.header.get_xyzt_units()
+	cropped.to_filename('./base.nii')		
 
 	'''
 	roi_map = get_roi_map()
 	index_AD, index_CN = get_adni_status()
 
-	cropped = np.memmap(os.path.join(root, 'EMCI', 'EMCI.npy'),  dtype='float64', mode='r', shape=(len(index_AD)-1, roi_map.shape[0], roi_map.shape[1], roi_map.shape[2]))[5] 
+	cropped = np.memmap(os.path.join(root, 'EMCI', 'EMCI.npy'),  dtype='float64', mode='r', shape=(len(index_AD), roi_map.shape[0], roi_map.shape[1], roi_map.shape[2]))[0] 
+	print(roi_map.shape)
+	print(cropped.shape)
 	cropped = nib.Nifti1Image(cropped, np.eye(4))
 	cropped.header.get_xyzt_units()
-	cropped.to_filename('./roi_CN.nii')
+	cropped.to_filename('./tmp.nii')
 	'''
-
-
-	print("time elapsed: ", time.time() - start)
-
 
 
 

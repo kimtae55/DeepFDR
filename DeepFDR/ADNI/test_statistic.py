@@ -5,7 +5,6 @@ import fnmatch
 import math
 import torch
 import sys
-from sympy import S
 from scipy.stats import skewnorm 
 import argparse 
 import random
@@ -19,7 +18,7 @@ class Data:
         self.ZIP_PATH = os.path.join(self.SAVE_PATH, 'voxels.zip')
 
     def loadTheta(self,path):
-        self.theta = np.load(path)
+        self.theta = np.ravel(np.load(path))
         self.SIZE = self.theta.shape[0]
  
     def generate_x(self,  p_l, mu_l, sigma_l, L, subjects, groups):
@@ -58,21 +57,40 @@ class Data:
                 np.savetxt(outfile, data_slice, fmt='%-7.6f')
                 outfile.write('# New z slice\n')
 
-    def generate_x_gaussian(self, p_l, mu_l, sigma_l2, groups):
+    def generate_x_gaussian(self, p_l, mu_l, sigma_l2, groups, sample_size):
         '''
         Gaussian mixture
         ''' 
-        mu, sigma = 0, 1
-        x = np.zeros(self.SIZE)
+        if sample_size == 1:
+            mu, sigma = 0, 1
+            x = np.zeros(self.SIZE)
 
-        for i in range(self.SIZE):
-            if self.theta[i]:
-                r = np.random.choice(groups, p=p_l)
-                x[i] = np.random.normal(mu_l[r], np.sqrt(sigma_l2[r]))
-            else:
-                x[i] = np.random.normal(mu,sigma)
+            for i in range(self.SIZE):
+                if self.theta[i]:
+                    r = np.random.choice(groups, p=p_l)
+                    x[i] = np.random.normal(mu_l[r], np.sqrt(sigma_l2[r]))
+                else:
+                    x[i] = np.random.normal(mu,sigma)
 
-        np.save(os.path.join(self.SAVE_PATH, 'x'), x)
+            np.save(os.path.join(self.SAVE_PATH, 'x_1d.npy'), x)
+        else:           
+            mu, sigma = 0, 1
+
+            npz_array = np.empty((sample_size, self.SIZE))
+
+            for sample in range(sample_size):
+                x = np.zeros(self.SIZE)
+
+                for i in range(self.SIZE):
+                    if self.theta[i]:
+                        r = np.random.choice(groups, p=p_l)
+                        x[i] = np.random.normal(mu_l[r], np.sqrt(sigma_l2[r]))
+                    else:
+                        x[i] = np.random.normal(mu,sigma)
+                npz_array[sample] = np.copy(x)
+                
+            filename = os.path.join(self.SAVE_PATH, 'data.npz')
+            np.savez(filename, npz_array)            
 
     def generate_x_nongaussian(self, distribution, mean, scale, a):
         '''
@@ -126,7 +144,7 @@ class Data:
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Test_Statistics Generation')
-    parser.add_argument('--savepath', default='./', type=str)
+    parser.add_argument('--savepath', type=str)
     parser.add_argument('--seed', type=int)
     parser.add_argument('--pL', nargs='*', type=float)
     parser.add_argument('--muL', nargs='*', type=float)
@@ -136,11 +154,13 @@ if __name__ == "__main__":
     parser.add_argument('--a', default = 4.0, type=float)
     parser.add_argument('--loc', default = 1.0, type=float)
     parser.add_argument('--scale', default = 4.0, type=float)
+    parser.add_argument('--sample_size', default = 1, type=int)
+    parser.add_argument('--labelpath', type=str)
     args = parser.parse_args()
 
     np.random.seed(args.seed)
     data = Data(args.seed, args.savepath)
-    data.loadTheta(os.path.join(args.savepath, str(args.seed),'label/label.npy'))
+    data.loadTheta(args.labelpath)
 
     print("RAND: ", args.seed)
     print("SIZE: {0}".format(data.SIZE))
@@ -148,7 +168,7 @@ if __name__ == "__main__":
     print("Generating Test Statistics...")
     if args.distribution == 'gaussian_mixture':
         groups = args.groups
-        data.generate_x_gaussian(p_l=args.pL, mu_l=args.muL, sigma_l2=args.sigmaL2, groups=groups)
+        data.generate_x_gaussian(p_l=args.pL, mu_l=args.muL, sigma_l2=args.sigmaL2, groups=args.groups, sample_size=args.sample_size)
     else:
         data.generate_x_nongaussian(distribution=args.distribution, mean=args.loc, scale=args.scale, a=args.a)
 

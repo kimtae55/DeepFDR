@@ -38,8 +38,8 @@ class Model2:
             self.params = np.array([4e-2, 4e-7, 5e-5, 8e-3, 6e-3]).astype(np.float64)
             self.params_prev = np.array([4e-2, 4e-7, 5e-5, 8e-3, 6e-3]).astype(np.float64)
         else:
-            self.params = np.array([6e-3, 4e-6, 5e-4, 7e-3, 6e-3]).astype(np.float64)
-            self.params_prev = np.array([6e-3, 4e-6, 5e-4, 7e-3, 6e-3]).astype(np.float64)              
+            self.params = np.array([6e-3, 4e-6, 8e-4, 8e-3, 7e-3]).astype(np.float64)
+            self.params_prev = np.array([6e-3, 4e-6, 8e-4, 8e-3, 7e-3]).astype(np.float64)              
 
         self.pL = np.array([0.5, 0.5])
         self.muL = np.array([-2.5, 1.5])
@@ -53,13 +53,13 @@ class Model2:
                       'delta': 1e-3,
                       'maxIter': 50,
                       'eps1': 1e-4,
-                      'eps2': 0.05,
-                      'eps3': 0.02,
+                      'eps2': 0.005,
+                      'eps3': 0.002,
                       'eps4': 1e-3,
                       'eps5': 1e-2,
                       'alpha': 1e-3,
-                      'burn_in': 50, # 80
-                      'num_samples': 100, # 100
+                      'burn_in': 80, # 80
+                      'num_samples': 40, # 100
                       'L': 2,
                       'newton_max': 3,
                       'fdr_control': 1e-3,
@@ -216,15 +216,16 @@ class Model2:
         print("time elapsed:", self.end - self.start)
 
     def computeArmijo(self, epoch, max_epochs):
-        lambda_m = 1e-6
+        lambda_m = 1e-4
         diff = np.zeros(5)
         count = 0
         satisfied = False
         # eq(11) satisfaction condition+
 
+        #delta = self.normalize(np.matmul(self.I_inv, self.U))
         delta = np.matmul(self.I_inv, self.U)
         print("delta: ", delta)
-        while count < 10:
+        while count < 5:
             self.params = self.params_prev + lambda_m * delta
             print("est_params: ", self.params)
             # check for alternative criterion when delta_varphi is too small for armijo convergence
@@ -265,6 +266,12 @@ class Model2:
             return 0.0
 
         return np.log(diff_next/diff_curr)
+
+    def normalize(self, v):
+        norm = np.linalg.norm(v)
+        if norm == 0: 
+           return v
+        return v / norm
 
     def converged(self):
         # we have 8 parameters
@@ -312,9 +319,9 @@ class Model2:
                 H_mean = H_mean + np.asarray(get[0][1])
 
                 if exp_sum is None:
-                    exp_sum = np.asarray(get[0][0])
+                    exp_sum = np.asarray(get[0][2])
                 else:
-                    exp_sum = np.vstack((exp_sum, np.asarray(get[0][0])))
+                    exp_sum = np.vstack((exp_sum, np.asarray(get[0][2])))
 
                 gamma = gamma + np.asarray(get[0][3])
 
@@ -326,7 +333,7 @@ class Model2:
         return self.theta, H_mean, H_iter, exp_sum, gamma
 
 
-    def gibb_sampler_nocomp(self, burn_in, n_samples, params, pL, sigmaL2, muL, x):
+    def gibb_sampler_nocomp(self, burn_in, n_samples, param, pL, sigmaL2, muL, x):
         mu_0 = 0
         sigma0_sq = 1
         const_0 = 1 / np.sqrt(np.array([2 * np.pi * sigma0_sq]))
@@ -344,15 +351,20 @@ class Model2:
         gamma = np.zeros(self.size)
         theta = self.init.copy()
         iter_burn = 0
-        params /= self.H_reparam
+        param /= self.H_reparam
+
+        print(param)
+        print(pL, sigmaL2, muL)
+        print('x.shape: ', x.shape)
+
         while iter_burn < burn_in:
-            theta = run(self.size, params, theta, dist, hs)
+            theta = run(self.size, param, theta, dist, hs)
             iter_burn += 1
 
         if n_samples > 0:
             # make sure dist_id is in shared_memory using ray.put
             # modify code to allow flexible num_cpus and n_samples
-            results = [sample_ray_nocomp.remote(self.size, params, theta, dist_id, n_samples//self.num_cpus, hs) for i in range(self.num_cpus)]
+            results = [sample_ray_nocomp.remote(self.size, param, theta, dist_id, n_samples//self.num_cpus, hs) for i in range(self.num_cpus)]
 
             done = False
             while not done:
@@ -362,7 +374,7 @@ class Model2:
                 results = not_ready
                 if not results: 
                     done = True
-
+        print(gamma)
         gamma /= n_samples
         return gamma
 
@@ -618,6 +630,36 @@ def get_roi_map():
 
     return roi_img
 
+def bound(volume):  
+    """ 
+    Bounding function to bound large arrays and np.memmaps
+    volume: A 3D np.array or np.memmap
+    """
+    count = 0
+    threshold = 0
+
+    mins = np.array(volume.shape)
+    maxes = np.zeros(3)
+    for z in range(volume.shape[0]):
+        for y in range(volume.shape[1]):
+            for x in range(volume.shape[2]):
+                if volume[z,y,x] != threshold:
+                    count += 1
+                    if z < mins[0]:
+                        mins[0] = z
+                    elif z > maxes[0]:
+                        maxes[0] = z
+                    if y < mins[1]:
+                        mins[1] = y
+                    elif y > maxes[1]:
+                        maxes[1] = y
+                    if x < mins[2]:
+                        mins[2] = x
+                    elif x > maxes[2]:
+                        maxes[2] = x
+
+    return mins, maxes, count
+
 def get_adni_status():
     # get list of EMCI and CN files
     index_AD = []
@@ -636,22 +678,20 @@ if __name__ == "__main__":
     parser.add_argument('--mode', type=str, help='Supported modes: gem_gen, label_gen', required=True)
     parser.add_argument('--x_path', type=str)
     parser.add_argument('--savepath', type=str)
-    parser.add_argument('--simulation_path', type=str)
     parser.add_argument('--limit', default=600, type=int)
     parser.add_argument('--labelpath', default='./', type=str)
-    parser.add_argument('--num_cpus', type=int)
+    parser.add_argument('--num_cpus', default = 2, type=int)
+    parser.add_argument('--num_threads', default = 10, type=int)
     args = parser.parse_args()
 
-    num_files_per_section = 600
     rng_seed = args.seed
     limit = args.limit
     mode = args.mode
 
     np.random.seed(rng_seed)
-    numba.set_num_threads(30)
+    numba.set_num_threads(args.num_threads)
 
-    #num_cpus = args.num_cpus
-    num_cpus = 4
+    num_cpus = args.num_cpus
     ray.init(num_cpus=num_cpus)
 
     x = np.load(os.path.join(args.x_path, 'x_1d.npy'))
@@ -666,10 +706,10 @@ if __name__ == "__main__":
         params_directory = os.path.join(args.savepath, 'result/params.txt')
         params, pL, sigmaL2, muL = parse_params(params_directory)
 
-        for i in range(limit):        
-            x = npzfile['arr_0'][num_files_per_section*rng_seed + i]
+        for i in range(limit):   
+            x_ = npzfile['arr_0'][limit*rng_seed + i]
             # burn_in = 80, n_samples = 2000 for simulation
-            label_npzarray[num_files_per_section*rng_seed + i] = model.gibb_sampler_nocomp(burn_in=100, n_samples=2000, params=params, pL=pL, sigmaL2=sigmaL2, muL=muL, x=x)
+            label_npzarray[limit*rng_seed + i] = model.gibb_sampler_nocomp(burn_in=100, n_samples=2000, param=params.copy(), pL=pL, sigmaL2=sigmaL2, muL=muL, x=x_)
 
         train_label_directory = os.path.join(args.x_path, 'label.npz') 
         if not os.path.exists(train_label_directory):
@@ -677,9 +717,8 @@ if __name__ == "__main__":
         else:
             orig = np.load(train_label_directory)
             orig_data = orig['arr_0']
-            orig_data[num_files_per_section*rng_seed:num_files_per_section*rng_seed + limit] = label_npzarray[num_files_per_section*rng_seed:num_files_per_section*rng_seed + limit]
+            orig_data[limit*rng_seed:limit*rng_seed + limit] = label_npzarray[limit*rng_seed:limit*rng_seed + limit]
             np.savez(train_label_directory, orig_data)
-            
     elif mode == "single_label":
         model.gem()
 
@@ -687,7 +726,7 @@ if __name__ == "__main__":
         params, pL, sigmaL2, muL = parse_params(params_directory)
 
         start = time.time()
-        gamma = model.gibb_sampler_nocomp(burn_in=100, n_samples=2000, params=params, pL=pL, sigmaL2=sigmaL2, muL=muL, x=x)
+        gamma = model.gibb_sampler_nocomp(burn_in=100, n_samples=2000, param=params.copy(), pL=pL, sigmaL2=sigmaL2, muL=muL, x=x)
         np.save(os.path.join(args.savepath, 'result/gamma.npy'), gamma)
 
         label = np.ravel(np.load(args.labelpath))
@@ -701,7 +740,7 @@ if __name__ == "__main__":
         params_directory = os.path.join(args.savepath, 'result/params.txt')
         params, pL, sigmaL2, muL = parse_params(params_directory)
 
-        gamma = model.gibb_sampler_nocomp(burn_in=50, n_samples=100, params=params, pL=pL, sigmaL2=sigmaL2, muL=muL, x=x)
+        gamma = model.gibb_sampler_nocomp(burn_in=50, n_samples=100, param=params.copy(), pL=pL, sigmaL2=sigmaL2, muL=muL, x=x)
         np.save(os.path.join(args.savepath, 'result/gamma.npy'), gamma)
 
         label = np.ravel(np.load(args.labelpath))
@@ -709,6 +748,9 @@ if __name__ == "__main__":
 
         roi_map = get_roi_map()
         index_AD, index_CN = get_adni_status()
+        mins, maxes, count = bound(roi_map)
+        maxes = maxes.astype(int)
+        roi_map = roi_map[mins[0]:maxes[0]+1, mins[1]:maxes[1]+1, mins[2]:maxes[2]+1]
 
         signal_1d = np.load(os.path.join(self.SAVE_DIR, 'lis.npy'))
         print('num_signals: ', np.count_nonzero(signal_1d))
@@ -726,8 +768,9 @@ if __name__ == "__main__":
 
 
         roi_img = np.memmap(os.path.join(self.SAVE_DIR, 'EMCI', 'EMCI.npy'),  dtype='float64', mode='r', shape=(len(index_AD), roi_map.shape[0], roi_map.shape[1], roi_map.shape[2]))[0] 
+        roi_img = roi_img[mins[0]:maxes[0]+1, mins[1]:maxes[1]+1, mins[2]:maxes[2]+1]
 
-        cropped = nib.Nifti1Image(bh_signals*roi_img, np.eye(4))
+        cropped = nib.Nifti1Image(signal_full*roi_img, np.eye(4))
         cropped.header.get_xyzt_units()
         cropped.to_filename(os.path.join(self.SAVE_DIR, 'result/gem.nii'))
 

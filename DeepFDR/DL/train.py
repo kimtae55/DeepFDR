@@ -20,10 +20,11 @@ def main():
     parser = argparse.ArgumentParser(description='DeepFDR using W-NET')
     parser.add_argument('--local_rank', type=int)
     parser.add_argument('--num_gpu', default=1, type=int)
-    parser.add_argument('--k_folds', default=6, type=int)
     parser.add_argument('--lr', default=1e-3, type=float)
     parser.add_argument('--momentum', default=0.9, type=float)
     parser.add_argument('--datapath', type=str)
+    parser.add_argument('--labelpath', default='./', type=str)
+    parser.add_argument('--mode', default=2, type=int) # 0 for train, 1 for inference, 2 for both
     args = parser.parse_args()
 
     config = Config()
@@ -31,15 +32,21 @@ def main():
     np.random.seed(config.seed)
     torch.manual_seed(config.seed)
     torch.cuda.manual_seed_all(config.seed)
-    #torch.backends.cudnn.benchmark = False
-    #torch.backends.cudnn.deterministic = True
 
     if args.num_gpu > 1:
         # handle multiple machine/multiple gpu training
         multi_training(args, config)
     else:
         # handle cpu & single gpu training
-        single_training(args, config)
+        if args.mode == 0:
+            single_training(args, config)
+        elif args.mode == 1:
+            model_name = 'lr_' + str(args.lr) + '.pth'
+            compute_statistics(args, config, model_name)
+        elif args.mode == 2:
+            single_training(args, config)
+            model_name = 'lr_' + str(args.lr) + '.pth'
+            compute_statistics(args, config, model_name)
 
 def weights_init(m):
     classname = m.__class__.__name__
@@ -112,13 +119,13 @@ def single_training(args, config):
     plt.ylabel("loss")
     plt.legend()
     plt.savefig(os.path.join(savepath, loss_name))
-
     print('Finished Training')
+    
+
 
 # Helpful documentation for single-node multi-gpu:
 # https://yangkky.github.io/2019/07/08/distributed-pytorch-tutorial.html
 # https://github.com/yangkky/distributed_tutorial/blob/master/src/mnist-distributed.py
-
 # multi-node multi-gpu: https://leimao.github.io/blog/PyTorch-Distributed-Training/
 def multi_training(args, config):
     torch.cuda.set_device(args.local_rank)
@@ -298,16 +305,19 @@ def train_epoch(trainloader, optimizer):
 
         # forward + backward + optimize
         # https://github.com/jvanvugt/pytorch-unet/blob/master/README.md ***** CRUCIAL CROPPING 
-        enc = net(inputs, returns='enc')
+        enc = net(inputs, labels, returns='enc')
         #define loss function here
 
         enc_loss=criterion(enc, labels)
         enc_loss.backward()
         optimizer.step()
         optimizer.zero_grad()
-        dec = net(inputs, returns='dec')
+        dec = net(inputs, labels, returns='dec')
 
         rec_loss=criterion(dec, dec_labels)
+        loss_ratio = enc_loss.item() / rec_loss.item()
+        rec_loss = rec_loss * loss_ratio
+
         rec_loss.backward()
         optimizer.step()
 
@@ -335,7 +345,7 @@ def test_epoch(testloader, optimizer):
                 labels = labels.cuda()            
                 dec_labels = dec_labels.cuda()
 
-            enc, dec = net(inputs)
+            enc, dec = net(inputs, labels)
 
             enc_loss=criterion(enc, labels)
             rec_loss=criterion(dec, dec_labels)
@@ -344,6 +354,160 @@ def test_epoch(testloader, optimizer):
             test_loss_dec += rec_loss.item()
 
     return test_loss_enc / (batch_idx + 1), test_loss_dec / (batch_idx + 1)
+
+def p_lis(gamma_1, threshold=0.1, label=None, savepath=None):
+    '''
+    Rejection of null hypothesis are shown as 1, consistent with online BH, Q-value, smoothFDR methods.
+    # LIS = P(theta = 0 | x)
+    # gamma_1 = P(theta = 1 | x) = 1 - LIS
+    '''
+    gamma_1 = gamma_1.ravel()
+    dtype = [('index', int), ('value', float)]
+    size = gamma_1.shape[0]
+
+    lis = np.zeros(size, dtype=dtype)
+    for i in range(size):
+        lis[i]['index'] = i
+        lis[i]['value'] = 1 - gamma_1[i]
+    # sort using lis values
+    lis = np.sort(lis, order='value')
+    # Data driven LIS-based FDR procedure
+    sum = 0
+    k = 0
+    for j in range(len(lis)):
+        sum += lis[j]['value']
+        if sum > (j+1)*threshold:
+            k = j
+            break
+
+    signal_lis = np.zeros(size)
+    for j in range(k):
+        index = lis[j]['index']
+        signal_lis[index] = 1  
+
+    if savepath is not None:
+        np.save(savepath, signal_lis)
+
+    if label is not None:
+        # Compute FDR, FNR, ATP using LIS and Label
+        # FDR -> (theta = 0) / num_rejected
+        # FNR -> (theta = 1) / num_not_rejected
+        # ATP -> (theta = 1) that is rejected
+        num_rejected = k
+        num_not_rejected = size - k
+        fdr = 0
+        fnr = 0
+        atp = 0
+        for i in range(size):
+            if signal_lis[i] == 1: # rejected
+                if label[i] == 0:
+                    fdr += 1
+                elif label[i] == 1:
+                    atp += 1
+            elif signal_lis[i] == 0: # not rejected
+                if label[i] == 1:
+                    fnr += 1
+
+        if num_rejected == 0:
+            fdr = 0
+        else:
+            fdr /= num_rejected
+
+        if num_not_rejected == 0:
+            fnr = 0
+        else:
+            fnr /= num_not_rejected
+
+        return fdr, fnr, atp
+
+def compute_statistics(args, config, model_name):
+    # i'm running locally, so just test out 100, change this later
+    data = np.load(os.path.join(args.datapath, 'data.npz'))['arr_0'].reshape((6000, 30,30,30))
+    label = np.ravel(np.load(os.path.join(args.labelpath)))
+    gamma = np.load(os.path.join(args.datapath, 'label.npz'))['arr_0'].reshape((6000, 30,30,30))
+    print(data.shape)
+    print(label.shape)
+    
+    model = WNet(config.num_classes)
+    model.cuda()
+    if args.num_gpu > 1:
+        model = nn.DataParallel(model)
+
+    model.load_state_dict(torch.load(os.path.join(args.datapath, 'result', 'sgd', model_name)))
+    model.eval()
+
+    total_dl_fdr = 0
+    total_dl_fnr = 0
+    total_dl_atp = 0
+
+    #load the files
+    num_train = 5000
+    for i in range(0, num_train):
+        input = torch.from_numpy(data[i]).float()
+        p3d = (1, 1, 1, 1, 1, 1)
+        input = F.pad(input, p3d, "constant", 0)
+        input = input[None, :, :, :]
+        input = input.unsqueeze(1)
+        input = input.cuda()
+        enc = model(input, returns='enc')
+        lis = torch.squeeze(enc).detach().cpu().numpy()    
+        dl_gamma = float(1.0) - lis
+
+        fdr, fnr, atp = p_lis(gamma_1=dl_gamma, label=label, savepath=os.path.join(args.datapath, 'result', 'sgd', 'train_' + os.path.splitext(model_name)[0]) + '.npy')
+
+        total_dl_fdr += fdr
+        total_dl_fnr += fnr
+        total_dl_atp += atp
+
+
+    total_dl_fdr /= num_train
+    total_dl_fnr /= num_train
+    total_dl_atp /= num_train
+   
+
+    # Save final signal_file
+    with open(os.path.join(args.datapath, 'result', 'sgd', 'train_' + os.path.splitext(model_name)[0]), 'w') as outfile:
+        outfile.write('DL train:\n')
+        outfile.write('fdr: ' + str(total_dl_fdr) + '\n')
+        outfile.write('fnr: ' + str(total_dl_fnr) + '\n')
+        outfile.write('atp: ' + str(total_dl_atp) + '\n')
+  
+
+    total_dl_fdr = 0
+    total_dl_fnr = 0
+    total_dl_atp = 0
+
+    #load the files
+    num_test = 1000
+    for i in range(num_train, num_train + num_test):
+        input = torch.from_numpy(data[i]).float()
+        p3d = (1, 1, 1, 1, 1, 1)
+        input = F.pad(input, p3d, "constant", 0)
+        input = input[None, :, :, :]
+        input = input.unsqueeze(1)
+        input = input.cuda()
+        enc = model(input, returns='enc')
+        lis = torch.squeeze(enc).detach().cpu().numpy()    
+        dl_gamma = float(1.0) - lis
+
+        fdr, fnr, atp = p_lis(gamma_1=dl_gamma, label=label, savepath=os.path.join(args.datapath, 'result', 'sgd', 'test_' + os.path.splitext(model_name)[0]) + '.npy')
+
+        total_dl_fdr += fdr
+        total_dl_fnr += fnr
+        total_dl_atp += atp
+
+
+    total_dl_fdr /= num_test
+    total_dl_fnr /= num_test
+    total_dl_atp /= num_test
+    
+
+    # Save final signal_file
+    with open(os.path.join(args.datapath, 'result', 'sgd', 'test_' + os.path.splitext(model_name)[0]), 'w') as outfile:
+        outfile.write('DL train:\n')
+        outfile.write('fdr: ' + str(total_dl_fdr) + '\n')
+        outfile.write('fnr: ' + str(total_dl_fnr) + '\n')
+        outfile.write('atp: ' + str(total_dl_atp) + '\n')
 
 if __name__ == "__main__":
     main()

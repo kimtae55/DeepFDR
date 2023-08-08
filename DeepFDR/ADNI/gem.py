@@ -53,8 +53,8 @@ class Model2:
                       'delta': 1e-3,
                       'maxIter': 50,
                       'eps1': 1e-4,
-                      'eps2': 0.005,
-                      'eps3': 0.002,
+                      'eps2': 0.2,
+                      'eps3': 0.02,
                       'eps4': 1e-3,
                       'eps5': 1e-2,
                       'alpha': 1e-3,
@@ -62,7 +62,7 @@ class Model2:
                       'num_samples': 40, # 100
                       'L': 2,
                       'newton_max': 3,
-                      'fdr_control': 1e-3,
+                      'fdr_control': 1e-1,
                       }
 
         self.x = x
@@ -694,7 +694,7 @@ if __name__ == "__main__":
     num_cpus = args.num_cpus
     ray.init(num_cpus=num_cpus)
 
-    x = np.load(os.path.join(args.x_path, 'x_1d.npy'))
+    x = np.load(os.path.join(args.x_path))['arr_0'][0] # load first file from npz
     model = Model2(x, args.savepath, num_cpus)
     dist = np.memmap('distance.npy', dtype='float16', mode='r', shape=(model.size, model.size)).astype(np.float32) # -----------------------------ADD RAY
     global dist_id

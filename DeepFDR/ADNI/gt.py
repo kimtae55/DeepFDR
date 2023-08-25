@@ -11,7 +11,7 @@ import argparse
 class GibbsSampler:
     def __init__(self, rng_seed, datapath):
         # RUN INSIDE MODEL FOLDER
-        self.SIZE = 15
+        self.SIZE = 30
         self.SAVE_DIR = datapath
         self.LABEL_NPY_PATH = os.path.join(self.SAVE_DIR, 'label.npy')
         self.LABEL_TXT_PATH = os.path.join(self.SAVE_DIR, 'label.txt')
@@ -144,7 +144,6 @@ if __name__ == "__main__":
 
     #sampler.precompute_distance_matrix()
 
-    sampler = GibbsSampler(args.seed, args.datapath)
     start = time.time()
     sampler.run(burn_in, num_samples)
     end = time.time()

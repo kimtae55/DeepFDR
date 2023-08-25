@@ -435,9 +435,6 @@ class Model2:
 
         np.save(os.path.join(self.SAVE_DIR, 'lis.npy'), signal_lis)
 
-        print(self.size)
-        print(k)
-
         if label is not None:
             # Compute FDR, FNR, ATP using LIS and Label
             # FDR -> (theta = 0) / num_rejected
@@ -689,14 +686,14 @@ if __name__ == "__main__":
     mode = args.mode
 
     np.random.seed(rng_seed)
-    numba.set_num_threads(args.num_threads)
+    numba.set_num_threads(numba.config.NUMBA_NUM_THREADS//args.num_cpus)
 
     num_cpus = args.num_cpus
     ray.init(num_cpus=num_cpus)
 
     x = np.load(os.path.join(args.x_path))['arr_0'][0] # load first file from npz
     model = Model2(x, args.savepath, num_cpus)
-    dist = np.memmap('distance.npy', dtype='float16', mode='r', shape=(model.size, model.size)).astype(np.float32) # -----------------------------ADD RAY
+    dist = np.memmap('distance.npy', dtype='float32', mode='r', shape=(model.size, model.size))
     global dist_id
     dist_id = ray.put(dist)
 

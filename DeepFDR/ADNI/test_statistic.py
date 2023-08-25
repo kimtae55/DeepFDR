@@ -16,6 +16,8 @@ class Data:
         self.GROUP0_PATH = os.path.join(self.SAVE_PATH, '0')
         self.GROUP1_PATH = os.path.join(self.SAVE_PATH, '1')
         self.ZIP_PATH = os.path.join(self.SAVE_PATH, 'voxels.zip')
+        if not os.path.exists(self.SAVE_PATH):
+            os.makedirs(self.SAVE_PATH)
 
     def loadTheta(self,path):
         self.theta = np.ravel(np.load(path))
@@ -54,7 +56,7 @@ class Data:
             indexes = np.random.choice(subjects, size=subjects, replace=True)
             sum_v1 = np.sum(v_1[indexes], axis=0)
             sum_v0 = np.sum(v_0[indexes], axis=0)
-            z = ((1.0/subjects)*sum_v0 - (1.0/subjects)*sum_v1) / (math.sqrt(((sigma_l2[0])/subjects)+((sigma_l2[1])/subjects)))
+            z = ((1.0/subjects)*sum_v1 - (1.0/subjects)*sum_v0) / (np.sqrt((1.0/subjects)+(1.0/subjects)))
             x_npz[sample] = np.copy(z)
 
         # save results
@@ -146,7 +148,7 @@ if __name__ == "__main__":
     parser.add_argument('--loc', default = 1.0, type=float)
     parser.add_argument('--scale', default = 4.0, type=float)
     parser.add_argument('--sample_size', default = 1, type=int)
-    parser.add_argument('--subjects', default = 100, type=int)
+    parser.add_argument('--subjects', default = 200, type=int)
     parser.add_argument('--labelpath', type=str)
     args = parser.parse_args()
 

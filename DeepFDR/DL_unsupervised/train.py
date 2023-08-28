@@ -21,6 +21,7 @@ def main():
     parser = argparse.ArgumentParser(description='DeepFDR using W-NET')
     parser.add_argument('--num_gpu', default=1, type=int)
     parser.add_argument('--lr', default=1e-3, type=float)
+    parser.add_argument('--l2', default=1e-1, type=float)
     parser.add_argument('--momentum', default=0.9, type=float)
     parser.add_argument('--datapath', type=str)
     parser.add_argument('--labelpath', default='./', type=str)
@@ -86,14 +87,17 @@ def single_training(args, config):
     criterion1 = NCutLoss3D()
     criterion2 = nn.MSELoss()
     #optimizer = torch.optim.Adam(net.parameters(), lr=args.lr, amsgrad=True)
-    optimizer = torch.optim.SGD(net.parameters(), lr=args.lr, momentum=args.momentum)
+    optimizer = torch.optim.SGD(net.parameters(), lr=args.lr, momentum=args.momentum, weight_decay=args.l2)
     lr_scheduler = torch.optim.lr_scheduler.ExponentialLR(optimizer, gamma=0.9)
     gaussian = normal.Normal(0.0, 1.0)
 
+    prev_loss_ratio = [1.0, 1.0]
     for epoch in range(config.epochs):  # loop over the dataset multiple times
         start_time = time.time()
-        train_loss_enc, train_loss_dec = train_epoch(trainloader, optimizer, args)
-        test_loss_enc, test_loss_dec = test_epoch(testloader, optimizer, args)
+        train_loss_enc, train_loss_dec = train_epoch(trainloader, optimizer, args, prev_loss_ratio[0])
+        #prev_loss_ratio[0] = train_loss_enc / train_loss_dec
+        test_loss_enc, test_loss_dec = test_epoch(testloader, optimizer, args, prev_loss_ratio[1])
+        #prev_loss_ratio[1] = test_loss_enc / test_loss_dec
         lr_scheduler.step()
 
         end_time = time.time()
@@ -127,7 +131,7 @@ def single_training(args, config):
     plt.savefig(os.path.join(savepath, loss_name))
     print('Finished Training')
  
-def train_epoch(trainloader, optimizer, args):
+def train_epoch(trainloader, optimizer, args, loss_ratio):
     global net
     net.train()
 
@@ -149,7 +153,7 @@ def train_epoch(trainloader, optimizer, args):
 
         # forward + backward + optimize
         # https://github.com/jvanvugt/pytorch-unet/blob/master/README.md ***** CRUCIAL CROPPING 
-        enc = net(inputs, returns='enc')
+        enc = torch.sigmoid(net(inputs, returns='enc'))
 
         enc_loss=criterion1(enc, y_0)
         enc_loss.backward()
@@ -163,8 +167,7 @@ def train_epoch(trainloader, optimizer, args):
             dec = torch.sigmoid(dec)
             rec_loss=criterion2(dec, y_1)
 
-        #loss_ratio = enc_loss.item() / rec_loss.item()
-        #rec_loss = rec_loss * loss_ratio
+        rec_loss = rec_loss * loss_ratio
 
         rec_loss.backward()
         optimizer.step()
@@ -175,7 +178,7 @@ def train_epoch(trainloader, optimizer, args):
     return train_loss_enc / (batch_idx + 1), train_loss_dec / (batch_idx + 1)
 
 
-def test_epoch(testloader, optimizer, args):
+def test_epoch(testloader, optimizer, args, loss_ratio):
     global net
     net.eval()
 
@@ -202,6 +205,7 @@ def test_epoch(testloader, optimizer, args):
                 dec = torch.sigmoid(dec)
                 rec_loss=criterion2(dec, y_1)
 
+            rec_loss = rec_loss * loss_ratio
             test_loss_enc += enc_loss.item()
             test_loss_dec += rec_loss.item()
 
@@ -292,7 +296,7 @@ def compute_statistics(args, config, model_name):
     total_dl_atp = 0
 
     #load the files
-    num_train = 1
+    num_train = 5000
     for i in range(0, num_train):
         input = torch.from_numpy(data[i]).float()
         p3d = (1, 1, 1, 1, 1, 1)
@@ -300,7 +304,7 @@ def compute_statistics(args, config, model_name):
         input = input[None, :, :, :]
         input = input.unsqueeze(1)
         input = input.cuda()
-        enc = model(input, returns='enc')
+        enc = torch.sigmoid(model(input, returns='enc'))
         dl_gamma = torch.squeeze(enc).detach().cpu().numpy()    
 
         fdr, fnr, atp = p_lis(gamma_1=dl_gamma, label=label, savepath=os.path.join(args.savepath, 'train_' + os.path.splitext(model_name)[0]) + '.npy')
@@ -328,7 +332,7 @@ def compute_statistics(args, config, model_name):
     total_dl_atp = 0
 
     #load the files
-    num_test = 1
+    num_test = 1000
     for i in range(num_train, num_train + num_test):
         input = torch.from_numpy(data[i]).float()
         p3d = (1, 1, 1, 1, 1, 1)
@@ -336,7 +340,7 @@ def compute_statistics(args, config, model_name):
         input = input[None, :, :, :]
         input = input.unsqueeze(1)
         input = input.cuda()
-        enc = model(input, returns='enc')
+        enc = torch.sigmoid(model(input, returns='enc'))
         dl_gamma = torch.squeeze(enc).detach().cpu().numpy()    
 
         fdr, fnr, atp = p_lis(gamma_1=dl_gamma, label=label, savepath=os.path.join(args.savepath, 'test_' + os.path.splitext(model_name)[0]) + '.npy')

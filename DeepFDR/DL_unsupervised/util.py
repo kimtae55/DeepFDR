@@ -5,9 +5,8 @@ import torch
 from torch import Tensor
 import torch.nn as nn
 import torch.nn.functional as F
-from scipy.ndimage import grey_opening
-from utils.filter import gaussian_kernel
 from scipy.stats import norm
+import plotly.graph_objs as go
 
 class EarlyStop:
     def __init__(self, patience: int = 10, threshold: float = 1e-2) -> None:
@@ -92,12 +91,15 @@ class NCutLoss3D(nn.Module):
         :param inputs: Raw images
         :return: Continuous N-Cut loss
         """
-        num_classes = labels.shape[1]
+        num_classes = 2 # binary using sigmoid only returns 1, so coded this manually for now
+        
         kernel = gaussian_kernel_3d(radius=self.radius, sigma=self.sigma_1, device=labels.device.type)
         loss = 0
 
         for k in range(num_classes):
-            class_probs = labels[:, k].unsqueeze(1)
+            if k == 0: class_probs = labels[:,0].unsqueeze(1)
+            elif k == 1: class_probs = 1.0 - labels[:,0].unsqueeze(1)
+      
             class_mean = torch.mean(inputs * class_probs, dim=(2, 3, 4), keepdim=True) / \
                 (torch.mean(class_probs, dim=(2, 3, 4), keepdim=True) + 1e-5)
             diff = (inputs - class_mean).pow(2).sum(dim=1).unsqueeze(1)
@@ -109,3 +111,30 @@ class NCutLoss3D(nn.Module):
             loss += nn.L1Loss()(numerator / (denominator + 1e-6), torch.zeros_like(numerator))
 
         return num_classes - loss
+
+
+def visualize_3d_mesh(data):
+    # Create a meshgrid of coordinates
+    x, y, z = np.meshgrid(np.arange(data.shape[0]),
+                          np.arange(data.shape[1]),
+                          np.arange(data.shape[2]))
+
+    # Create a scatter3d trace for the data points where value is 1
+    scatter = go.Scatter3d(x=x[data == 1],
+                           y=y[data == 1],
+                           z=z[data == 1],
+                           mode='markers',
+                           marker=dict(size=2, color='blue')
+                           )
+
+    # Set layout properties
+    layout = go.Layout(scene=dict(aspectmode='cube'))
+
+    # Create a figure and add the scatter trace
+    fig = go.Figure(data=[scatter], layout=layout)
+
+    # Show the interactive plot
+    fig.show()
+
+
+

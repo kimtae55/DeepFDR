@@ -35,7 +35,7 @@ class DataLoader():
             self.y = np.load(train_input_path)['arr_0'][train_split:train_split+valid_split].reshape((-1,30,30,30))
             self.data_len = valid_split
 
-        self.p_value = teorch.FloatTensor(1.0)-torch.FloatTensor(stats.norm.cdf(X.copy()))
+        self.p_value = 2*(torch.FloatTensor([1.0])-torch.FloatTensor(stats.norm.cdf(self.X.copy())))
         self.X = torch.FloatTensor(self.X) # X
         self.y = self.X.clone() # X
 

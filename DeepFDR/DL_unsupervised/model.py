@@ -46,7 +46,8 @@ class UEnc(nn.Module):
         self.enc3=Block(2*ch_mul, 4*ch_mul)
         self.enc4=Block(4*ch_mul, 8*ch_mul)
 
-        self.middle=Block(8*ch_mul, 16*ch_mul)
+        #self.middle=Block(8*ch_mul, 16*ch_mul)
+        self.middle=Block(4*ch_mul,8*ch_mul)
         #self.middle=Block(2*ch_mul, 4*ch_mul)
 
         self.up1=nn.ConvTranspose3d(16*ch_mul, 8*ch_mul, kernel_size=3, stride=2, padding=1, output_padding=1)
@@ -65,14 +66,14 @@ class UEnc(nn.Module):
         enc1=self.enc1(x)
         enc2=self.enc2(F.max_pool3d(enc1, (2, 2, 2)))
         enc3=self.enc3(F.max_pool3d(enc2, (2,2,2)))
-        enc4 = self.enc4(F.max_pool3d(enc3, (2,2,2)))
+        #enc4 = self.enc4(F.max_pool3d(enc3, (2,2,2)))
 
-        middle = self.middle(F.max_pool3d(enc4, (2,2,2)), lastLayer=True)
+        middle = self.middle(F.max_pool3d(enc3, (2,2,2)), lastLayer=True)
 
-        up1 = torch.cat((enc4, self.up1(middle)), 1)
-        dec1 = self.dec1(up1)
+        #up1 = torch.cat((enc4, self.up1(middle)), 1)
+        #dec1 = self.dec1(up1)
 
-        up2=torch.cat((enc3, self.up2(dec1)), 1)
+        up2=torch.cat((enc3, self.up2(middle)), 1)
         dec2=self.dec2(up2)
 
         up3=torch.cat((enc2, self.up3(dec2)), 1)
@@ -94,8 +95,9 @@ class UDec(nn.Module):
         self.enc3=Block(2*ch_mul, 4*ch_mul)
         self.enc4=Block(4*ch_mul, 8*ch_mul)
 
-        self.middle=Block(8*ch_mul, 16*ch_mul)
-        #self.middle=Block(2*ch_mul, 4*ch_mul)
+        #self.middle=Block(8*ch_mul, 16*ch_mul)
+        #self.middle=Block(4*ch_mul, 8*ch_mul)
+        self.middle=Block(2*ch_mul, 4*ch_mul)
         
         self.up1=nn.ConvTranspose3d(16*ch_mul, 8*ch_mul, kernel_size=3, stride=2, padding=1, output_padding=1)
         self.dec1=Block(16*ch_mul, 8*ch_mul)
@@ -114,19 +116,19 @@ class UDec(nn.Module):
 
         enc2 = self.enc2(F.max_pool3d(enc1, (2,2,2)))
 
-        enc3 = self.enc3(F.max_pool3d(enc2, (2,2,2)))
+        #enc3 = self.enc3(F.max_pool3d(enc2, (2,2,2)))
 
-        enc4 = self.enc4(F.max_pool3d(enc3, (2,2,2)))
+        #enc4 = self.enc4(F.max_pool3d(enc3, (2,2,2)))
 
-        middle = self.middle(F.max_pool3d(enc4, (2,2,2)), lastLayer=True)
+        middle = self.middle(F.max_pool3d(enc2, (2,2,2)), lastLayer=True)
 
-        up1 = torch.cat((enc4, self.up1(middle)), 1)
-        dec1 = self.dec1(up1)
+        #up1 = torch.cat((enc4, self.up1(middle)), 1)
+        #dec1 = self.dec1(up1)
 
-        up2 = torch.cat((enc3, self.up2(dec1)), 1)
-        dec2 = self.dec2(up2)
+        #up2 = torch.cat((enc3, self.up2(middle)), 1)
+        #dec2 = self.dec2(up2)
 
-        up3 = torch.cat((enc2, self.up3(dec2)), 1)
+        up3 = torch.cat((enc2, self.up3(middle)), 1)
         dec3 =self.dec3(up3)
 
         up4 = torch.cat((enc1, self.up4(dec3)), 1)
@@ -147,7 +149,7 @@ class WNet(nn.Module):
         self.p3d = (1, 1, 1, 1, 1, 1)
 
     def forward(self, x, returns='both'):
-        enc = torch.sigmoid(self.UEnc(x)) # P(h=0|x), LIS
+        enc = self.UEnc(x) # P(h=0|x), LIS
 
         unpadded_enc = self.unpad(enc, self.p3d)
 

@@ -8,6 +8,7 @@ from configure import Config
 import math
 import torch.nn.functional as F
 import scipy.stats as stats
+from util import qvalue
 
 class DataLoader():
     #initialization
@@ -16,26 +17,23 @@ class DataLoader():
     def __init__(self, mode, config, args):
 
         self.config = config
+        self.config.inputsize = (30,30,30)
         
         train_input_path = os.path.join(self.config.datapath)
 
-        if self.config.data_mode == 'single':
-            train_split = 1
-            valid_split = 1
-        elif self.config.data_mode == 'multi':
-            train_split = 5000
-            valid_split = 1000
-
         if mode == 'train':
-            self.X = np.load(train_input_path)['arr_0'][0:train_split].reshape((-1,30,30,30))
-            self.y = np.load(train_input_path)['arr_0'][0:train_split].reshape((-1,30,30,30))
-            self.data_len = train_split
-        elif mode == 'test':
-            self.X = np.load(train_input_path)['arr_0'][train_split:train_split+valid_split].reshape((-1,30,30,30))
-            self.y = np.load(train_input_path)['arr_0'][train_split:train_split+valid_split].reshape((-1,30,30,30))
-            self.data_len = valid_split
+            self.X = np.load(train_input_path)[self.config.sample_number:self.config.sample_number+1].reshape((-1,)+self.config.inputsize)
+            self.y = np.load(train_input_path)[self.config.sample_number:self.config.sample_number+1].reshape((-1,)+self.config.inputsize)
+            self.data_len = 1
+            #self.X = np.load(self.config.labelpath).reshape((-1,30,30,30))
+            #self.y = np.load(self.config.labelpath).reshape((-1,30,30,30))
 
-        self.p_value = 2*(torch.FloatTensor([1.0])-torch.FloatTensor(stats.norm.cdf(self.X.copy())))
+        # if p_value is less than 0.1, it's considered a 1 in segementation 
+        # and our model tries to predict P(h=1), so I should do 1-output if I want to use MSELoss against q-value or p-value 
+        self.p_value = 2.0*(1.0-stats.norm.cdf(np.fabs(self.X.copy())))
+        self.q_value = qvalue(self.p_value.ravel(), threshold=0.1)[1].reshape((-1,)+self.config.inputsize)
+        self.q_value = torch.FloatTensor(self.q_value)
+        self.p_value = torch.FloatTensor(self.p_value)
         self.X = torch.FloatTensor(self.X) # X
         self.y = self.X.clone() # X
 
@@ -46,6 +44,7 @@ class DataLoader():
         self.X_pad = self.X_pad.unsqueeze(1)
         self.y_0 = self.y.unsqueeze(1)
         self.y_1 = self.p_value.unsqueeze(1)
+        self.y_2 = self.q_value.unsqueeze(1)
 
         #form dataset
         self.dataset = self.form_dataset()
@@ -56,7 +55,8 @@ class DataLoader():
             input = self.X_pad[batch_id:min(self.X_pad.shape[0],batch_id+self.config.batch_size)]
             y_0 = self.y_0[batch_id:min(self.y_0.shape[0],batch_id+self.config.batch_size)]
             y_1 = self.y_1[batch_id:min(self.y_1.shape[0],batch_id+self.config.batch_size)]
-            dataset.append(Data.TensorDataset(input, y_0, y_1))
+            y_2 = self.y_2[batch_id:min(self.y_2.shape[0],batch_id+self.config.batch_size)]
+            dataset.append(Data.TensorDataset(input, y_0, y_1, y_2))
         return Data.ConcatDataset(dataset)
 
     def __len__(self):

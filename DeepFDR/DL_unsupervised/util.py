@@ -6,10 +6,15 @@ from torch import Tensor
 import torch.nn as nn
 import torch.nn.functional as F
 from scipy.stats import norm
-import plotly.graph_objs as go
+from scipy.interpolate import UnivariateSpline
+from statsmodels.sandbox.stats.multicomp import multipletests
+import scipy 
+from statsmodels.stats.multitest import local_fdr, NullDistribution
+import os 
+import time
 
 class EarlyStop:
-    def __init__(self, patience: int = 10, threshold: float = 1e-2) -> None:
+    def __init__(self, patience: int = 3, threshold: float = 1e-2) -> None:
         # self.queue = collections.deque([0] * patience, maxlen=patience)
         self.patience = patience
         self.threshold = threshold
@@ -36,105 +41,268 @@ class EarlyStop:
             if self.wait >= self.patience:
                 return True
         return False
- 
-def gaussian_kernel(radius: int = 3, sigma: float = 4, device='cpu'):
-    x_2 = np.linspace(-radius, radius, 2*radius+1) ** 2
-    dist = np.sqrt(x_2.reshape(-1, 1) + x_2.reshape(1, -1)) / sigma
-    kernel = norm.pdf(dist) / norm.pdf(0)
-    kernel = torch.from_numpy(kernel.astype(np.float32))
-    kernel = kernel.view((1, 1, kernel.shape[0], kernel.shape[1]))
 
-    if device == 'cuda':
-        kernel = kernel.cuda()
+class FDR_MSELoss(nn.Module):
+    def __init__(self):
+        super(FDR_MSELoss, self).__init__()
+        self.lambda_reg = 0.0
 
-    return kernel
+    def forward(self, p_value, predicted_p_value):
+        # Calculate the Mean Squared Error (MSE) loss between true and predicted p-values
+        mse_loss = torch.mean((predicted_p_value - p_value)**2)
 
-def gaussian_kernel_3d(radius: int = 3, sigma: float = 4, device='cpu'):
-    x = np.linspace(-radius, radius, 2*radius+1)
-    y = np.linspace(-radius, radius, 2*radius+1)
-    z = np.linspace(-radius, radius, 2*radius+1)
+        # Regularization term for FDR control
+        #penalty = torch.mean(torch.abs(predicted_p_value - 0.5)) # sometimes the model gets stuck, generating predictions near 0.5
 
-    x, y, z = np.meshgrid(x, y, z)
-    dist = np.sqrt(x**2 + y**2 + z**2)
-    
-    kernel = np.exp(-dist**2 / (2 * sigma**2))
+        # Combine the MSE loss and regularization term
+        total_loss = mse_loss 
 
-    kernel = torch.from_numpy(kernel.astype(np.float32))
-    kernel = kernel.view((1, 1, kernel.shape[0], kernel.shape[1], kernel.shape[2]))
+        return total_loss
 
-    if device == 'cuda':
-        kernel = kernel.cuda()
+class SoftNCutLoss3D(nn.Module):
+    def __init__(self):
+        super(SoftNCutLoss3D, self).__init__()
 
-    return kernel
+    def calculate_weights(self, input, batch_size, img_size=(30, 30, 30), ox=3, radius=3 ,oi=11):
+        channels = 1
 
-class NCutLoss3D(nn.Module):
-    r"""Implementation of the continuous N-Cut loss, as in:
-    'W-Net: A Deep Model for Fully Unsupervised Image Segmentation', by Xia, Kulis (2017)"""
+        d, h, w = img_size
+        p = radius
 
-    def __init__(self, radius: int = 4, sigma_1: float = 5, sigma_2: float = 1):
-        r"""
-        :param radius: Radius of the spatial interaction term
-        :param sigma_1: Standard deviation of the spatial Gaussian interaction
-        :param sigma_2: Standard deviation of the pixel value Gaussian interaction
-        """
-        super(NCutLoss3D, self).__init__()
-        self.radius = radius
-        self.sigma_1 = sigma_1  # Spatial standard deviation
-        self.sigma_2 = sigma_2  # Pixel value standard deviation
+        image = torch.mean(input, dim=1, keepdim=True)
 
-    def forward(self, labels: Tensor, inputs: Tensor) -> Tensor:
-        r"""Computes the continuous N-Cut loss, given a set of class probabilities (labels) and raw images (inputs).
-        Small modifications have been made here for efficiency -- specifically, we compute the pixel-wise weights
-        relative to the class-wide average, rather than for every individual pixel.
+        image = F.pad(input=image, pad=(p, p, p, p, p, p), mode='constant', value=0)
 
-        :param labels: Predicted class probabilities
-        :param inputs: Raw images
-        :return: Continuous N-Cut loss
-        """
-        num_classes = 2 # binary using sigmoid only returns 1, so coded this manually for now
+        kd, kh, kw = radius * 2 + 1, radius * 2 + 1, radius * 2 + 1
+        dd, dh, dw = 1, 1, 1
+
+        patches = image.unfold(2, kd, dd).unfold(3, kh, dh).unfold(4, kw, dw)
+
+        patches = patches.contiguous().view(batch_size, channels, -1, kd, kh, kw)
+
+        patches = patches.permute(0, 2, 1, 3, 4, 5)
+        patches = patches.view(-1, channels, kd, kh, kw)
+
+        center_values = patches[:, :, radius, radius, radius]
+        center_values = center_values[:, :, None, None, None]
+        center_values = center_values.expand(-1, -1, kd, kh, kw)
+
+        k_row = (torch.arange(1, kd + 1) - torch.arange(1, kd + 1)[radius]).expand(kd, kh, kw)
+
+        if torch.cuda.is_available():
+            k_row = k_row.cuda()
+
+        distance_weights = (k_row ** 2 + k_row.unsqueeze(-1) ** 2 + k_row.unsqueeze(-2) ** 2)
+
+        mask = distance_weights.le(radius)
+        distance_weights = torch.exp(-distance_weights / (ox**2))
+        distance_weights = torch.mul(mask, distance_weights)
+
+        patches = torch.exp(-((patches - center_values)**2) / (oi**2))
+        return torch.mul(patches, distance_weights)
+
+    def soft_n_cut_loss_single_k(self, weights, enc, batch_size, img_size=(30, 30, 30), radius=3):
+        channels = 1
+        d, h, w = img_size
+        p = radius
+
+        kd, kh, kw = radius * 2 + 1, radius * 2 + 1, radius * 2 + 1
+        dd, dh, dw = 1, 1, 1
+
+        enc = enc.unsqueeze(0)
+        encoding = F.pad(input=enc, pad=(p, p, p, p, p, p), mode='constant', value=0)
+
+        seg = encoding.unfold(2, kd, dd).unfold(3, kh, dh).unfold(4, kw, dw)
+        seg = seg.contiguous().view(batch_size, channels, -1, kd, kh, kw)
+
+        seg = seg.permute(0, 2, 1, 3, 4, 5)
+        seg = seg.view(-1, channels, kd, kh, kw)
+
+        nom = weights * seg
+
+        nominator = torch.sum(enc * torch.sum(nom, dim=(1, 2, 3, 4)).reshape(batch_size, d, h, w), dim=(1, 2, 3, 4))
+        denominator = torch.sum(enc * torch.sum(weights, dim=(1, 2, 3, 4)).reshape(batch_size, d, h, w), dim=(1, 2, 3, 4))
+
+        return torch.div(nominator, denominator)
+
+    def forward(self, image, enc):
+        batch_size = 1
+        k = 2
+        weights = self.calculate_weights(image, batch_size)
         
-        kernel = gaussian_kernel_3d(radius=self.radius, sigma=self.sigma_1, device=labels.device.type)
-        loss = 0
+        loss = []
+        for i in range(k):
+            if i == 0: loss.append(self.soft_n_cut_loss_single_k(weights, enc[:, 0], batch_size))
+            elif i == 1: loss.append(self.soft_n_cut_loss_single_k(weights, 1-enc[:, 0], batch_size))
+        
+        da = torch.stack(loss)
+        loss = torch.mean(k - torch.sum(da, dim=0)) 
 
-        for k in range(num_classes):
-            if k == 0: class_probs = labels[:,0].unsqueeze(1)
-            elif k == 1: class_probs = 1.0 - labels[:,0].unsqueeze(1)
-      
-            class_mean = torch.mean(inputs * class_probs, dim=(2, 3, 4), keepdim=True) / \
-                (torch.mean(class_probs, dim=(2, 3, 4), keepdim=True) + 1e-5)
-            diff = (inputs - class_mean).pow(2).sum(dim=1).unsqueeze(1)
-            weights = torch.exp(diff.pow(2).mul(-1 / self.sigma_2 ** 2))
+        #penalty = torch.mean(torch.abs(enc - 0.5)) # sometimes the model gets stuck, generating predictions near 0.5
 
-            # Compute N-cut loss in 3D using conv3d
-            numerator = torch.sum(class_probs * F.conv3d(class_probs * weights, kernel, padding=self.radius))
-            denominator = torch.sum(class_probs * F.conv3d(weights, kernel, padding=self.radius))
-            loss += nn.L1Loss()(numerator / (denominator + 1e-6), torch.zeros_like(numerator))
+        return loss 
 
-        return num_classes - loss
+def dice(true_mask, pred_mask, non_seg_score=1.0):
+    """
+        Computes the Dice coefficient.
+        Args:
+            true_mask : Array of arbitrary shape.
+            pred_mask : Array with the same shape than true_mask.  
+        
+        Returns:
+            A scalar representing the Dice coefficient between the two segmentations. 
+        
+    """
+    assert true_mask.shape == pred_mask.shape
+
+    true_mask = np.asarray(true_mask).astype(np.bool)
+    pred_mask = np.asarray(pred_mask).astype(np.bool)
+
+    # If both segmentations are all zero, the dice will be 1. (Developer decision)
+    im_sum = true_mask.sum() + pred_mask.sum()
+    if im_sum == 0:
+        return non_seg_score
+
+    # Compute Dice coefficient
+    intersection = np.logical_and(true_mask, pred_mask)
+    return 2. * intersection.sum() / im_sum
+
+def qvalue(pvals, threshold=0.05, verbose=False):
+    """Function for estimating q-values from p-values using the Storey-
+    Tibshirani q-value method (2003).
+
+    Input arguments:
+    ================
+    pvals       - P-values corresponding to a family of hypotheses.
+    threshold   - Threshold for deciding which q-values are significant.
+
+    Output arguments:
+    =================
+    significant - An array of flags indicating which p-values are significant.
+    qvals       - Q-values corresponding to the p-values.
+    """
+
+    """Count the p-values. Find indices for sorting the p-values into
+    ascending order and for reversing the order back to original."""
+    m, pvals = len(pvals), np.asarray(pvals)
+    ind = np.argsort(pvals)
+    rev_ind = np.argsort(ind)
+    pvals = pvals[ind]
+
+    # Estimate proportion of features that are truly null.
+    kappa = np.arange(0, 0.96, 0.01)
+    pik = [sum(pvals > k) / (m*(1-k)) for k in kappa]
+    cs = UnivariateSpline(kappa, pik, k=3, s=None, ext=0)
+    pi0 = float(cs(1.))
+    if (verbose):
+        print('The estimated proportion of truly null features is %.3f' % pi0)
+
+    """The smoothing step can sometimes converge outside the interval [0, 1].
+    This was noted in the published literature at least by Reiss and
+    colleagues [4]. There are at least two approaches one could use to
+    attempt to fix the issue:
+    (1) Set the estimate to 1 if it is outside the interval, which is the
+        assumption in the classic FDR method.
+    (2) Assume that if pi0 > 1, it was overestimated, and if pi0 < 0, it
+        was underestimated. Set to 0 or 1 depending on which case occurs.
+
+    I'm choosing second option 
+    """
+    if pi0 < 0:
+        pi0 = 0
+    elif pi0 > 1:
+        pi0 = 1
+
+    # Compute the q-values.
+    qvals = np.zeros(np.shape(pvals))
+    qvals[-1] = pi0*pvals[-1]
+    for i in np.arange(m-2, -1, -1):
+        qvals[i] = min(pi0*m*pvals[i]/float(i+1), qvals[i+1])
+
+    # Test which p-values are significant.
+    significant = np.zeros(np.shape(pvals), dtype='bool')
+    significant[ind] = qvals<threshold
+
+    """Order the q-values according to the original order of the p-values."""
+    qvals = qvals[rev_ind]
+    return significant, qvals
+
+def compute_qval(x, alpha):
+    # calculate p_value from z-score
+
+    x_ = np.ravel(x.copy())
+    p_value = scipy.stats.norm.sf(np.fabs(x_))*2.0 # two-sided tail, calculates 1-cdf
+    p_value = np.ravel(p_value)
+    qv = qvalue(p_value, threshold=alpha)[1]
+    return qv
+
+def compute_bh(x, alpha):
+    # calculate p_value from z-score
+    x_ = np.ravel(x.copy())
+    p_value = scipy.stats.norm.sf(np.fabs(x_))*2.0 # two-sided tail, calculates 1-cdf
+    p_value = np.ravel(p_value)    
+    reject, pvals_corrected, alphacSidak, alphacBonf = multipletests(p_value, alpha=alpha, method='fdr_bh')
+    return reject, pvals_corrected, alphacSidak, alphacBonf
+
+def p_lis(gamma_1, threshold=0.1, label=None, savepath=None, flip=False):
+    '''
+    Rejection of null hypothesis are shown as 1, consistent with online BH, Q-value, smoothFDR methods.
+    # LIS = P(theta = 0 | x)
+    # gamma_1 = P(theta = 1 | x) = 1 - LIS
+    '''
+    gamma_1 = gamma_1.ravel()
+    dtype = [('index', int), ('value', float)]
+    size = gamma_1.shape[0]
+
+    # flip
+    lis = np.zeros(size, dtype=dtype)
+    lis[:]['index'] = np.arange(0, size)
+    lis[:]['value'] = 1-gamma_1 if flip else gamma_1
+
+    # get k
+    lis = np.sort(lis, order='value')
+    cumulative_sum = np.cumsum(lis[:]['value'])
+    k = np.argmax(cumulative_sum > (np.arange(len(lis)) + 1)*threshold)
+
+    signal_lis = np.zeros(size)
+    signal_lis[lis[:k]['index']] = 1
+
+    if savepath is not None:
+        np.save(savepath + 'gamma.npy', gamma_1)
+        np.save(savepath + 'lis.npy', signal_lis)
+
+    if label is not None:
+        # GT FDP
+        rx = k
+        sigx = np.sum(1-label[lis[:k]['index']])
+        fdr = sigx / rx
+
+        # GT FNR
+        rx = size - k
+        sigx = np.sum(label[lis[k:]['index']]) 
+        fnr = sigx / rx
+
+        # GT ATP
+        atp = np.sum(label[lis[:k]['index']]) 
+        return fdr, fnr, atp
+    return k, lis # contains index, value of the roi lis
 
 
-def visualize_3d_mesh(data):
-    # Create a meshgrid of coordinates
-    x, y, z = np.meshgrid(np.arange(data.shape[0]),
-                          np.arange(data.shape[1]),
-                          np.arange(data.shape[2]))
+def lfdr(x, alpha, null):
+    """
+    https://www.statsmodels.org/dev/generated/statsmodels.stats.multitest.local_fdr.html
+    """
+    z_score = np.ravel(x.copy())
+    print(null.null_proportion)
+    fdr = local_fdr(z_score, null_proportion=null.null_proportion) 
+    lfdr_signals = np.zeros(z_score.shape[0])
 
-    # Create a scatter3d trace for the data points where value is 1
-    scatter = go.Scatter3d(x=x[data == 1],
-                           y=y[data == 1],
-                           z=z[data == 1],
-                           mode='markers',
-                           marker=dict(size=2, color='blue')
-                           )
+    for i in range(z_score.shape[0]):
+        if fdr[i] <= alpha:
+            lfdr_signals[i] = 1
+    return lfdr_signals
 
-    # Set layout properties
-    layout = go.Layout(scene=dict(aspectmode='cube'))
 
-    # Create a figure and add the scatter trace
-    fig = go.Figure(data=[scatter], layout=layout)
-
-    # Show the interactive plot
-    fig.show()
 
 
 

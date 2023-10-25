@@ -7,13 +7,14 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import sys
-
+import argparse
+import time 
 #os.environ['CUDA_LAUNCH_BLOCKING'] = '1'
 
 class Model1:
-    def __init__(self, x_file, rng_seed):
+    def __init__(self, x_file, rng_seed, savepath):
         torch.set_default_dtype(torch.float64)
-        self.SAVE_DIR = os.path.join(os.getcwd(), '../../data/model1/' + str(rng_seed) +'/result')
+        self.SAVE_DIR = savepath
         if not os.path.exists(self.SAVE_DIR):
             os.makedirs(self.SAVE_DIR)
                 
@@ -45,7 +46,7 @@ class Model1:
                       'fdr_control': 0.1,
                       'tiny': 1e-8
                       }
-        self.x = torch.from_numpy(np.loadtxt(x_file).reshape((Data.VOXEL_SIZE,Data.VOXEL_SIZE,Data.VOXEL_SIZE))).cuda()
+        self.x = torch.from_numpy(x_file).cuda()
         #self.x = torch.load(x_file).cuda()
         self.gamma = torch.zeros(self.x.shape).cuda()  # P(theta | x)
         self.init = torch.zeros(self.x.shape).cuda()  # initial theta value for gibb's sampling
@@ -179,7 +180,7 @@ class Model1:
             for key, value in self.params.items():
                 outfile.write(str(key) + ': ' + str(value) + '\n')
 
-        gamma_directory = os.path.join(self.SAVE_DIR, 'gamma.txt')
+        gamma_directory = os.path.join(self.SAVE_DIR, 'gamma_shmrf.npy')
         with open(gamma_directory, 'w') as outfile:
             for data_slice in self.gamma.cpu().numpy():
                 np.savetxt(outfile, data_slice, fmt='%-8.4f')
@@ -407,32 +408,67 @@ class Model1:
             fnr = 0
         else:
             fnr /= num_not_rejected
+               
+        return fdr, fnr, atp 
         
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description='Test_Statistics Generation')
+    parser.add_argument('--seed', default=0, type=int)
+    args = parser.parse_args()
+
+    torch.manual_seed(args.seed)
+    if torch.cuda.is_available():
+        torch.cuda.set_device(0)
+        print("GPU: ", torch.cuda.get_device_name(0))
+
+    num_replications = 50
+    savepath_list = []
+    mu_list = ['mu_n4_2', 'mu_n35_2', 'mu_n3_2', 'mu_n25_2', 'mu_n2_2', 'mu_n15_2', 'mu_n1_2']
+    sigma_list = ['sigma_125_1', 'sigma_25_1', 'sigma_5_1', 'sigma_1_1', 'sigma_2_1', 'sigma_4_1', 'sigma_8_1']
+    root = '/scratch/tk2737/DeepFDR/data/sim'
+
+    for sig in sigma_list:
+        path = root + '/' + 'sigma/' + sig
+        savepath_list.append(path)
+
+    for mu in mu_list:
+        path = root + '/' + 'mu/' + mu
+        savepath_list.append(path)
+
+
+    for index in range(len(savepath_list)):
+        total_fdr = 0.0
+        total_fnr = 0.0
+        total_atp = 0.0
+
+        label = np.load(root+'/cubes0.2.npy')[0].reshape((30,30,30))
+
+        start = time.time()
+        for rep in range(num_replications):
+            x_file = np.load(savepath_list[index] + '/data.npy')[rep].reshape((Data.VOXEL_SIZE,Data.VOXEL_SIZE,Data.VOXEL_SIZE))
+            fdr = Model1(x_file, args.seed, args.savepath)
+            fdr.gem()
+            fdr, fnr, atp  = fdr.p_lis(np.load(os.path.join(args.savepath, 'gamma_shmrf.npy')).reshape((Data.VOXEL_SIZE,Data.VOXEL_SIZE,Data.VOXEL_SIZE)),
+                     np.load(labelpath).reshape((Data.VOXEL_SIZE,Data.VOXEL_SIZE,Data.VOXEL_SIZE)))
+            total_fdr += fdr
+            total_fnr += fnr
+            total_atp += atp
+        end = time.time()
+        elapsed = (end - start)/num_replications
+        print('sHMRF computation time: ', elapsed)
+
+        avg_fdr /= num_replications
+        avg_fnr /= num_replications
+        avg_atp /= num_replications
         # Save final signal_file
-        signal_directory = os.path.join(self.SAVE_DIR, 'signal.txt')
+        signal_directory = os.path.join(savepath_list[index], 'shmrf.txt')
         with open(signal_directory, 'w') as outfile:
-            outfile.write('fdr: ' + str(fdr) + '\n')
-            outfile.write('fnr: ' + str(fnr) + '\n')
-            outfile.write('atp: ' + str(atp) + '\n')
+            outfile.write('fdr: ' + str(avg_fdr) + '\n')
+            outfile.write('fnr: ' + str(avg_fnr) + '\n')
+            outfile.write('atp: ' + str(avg_atp) + '\n')
+            outfile.write('time: ' + str(elapsed) + '\n')
             for data_slice in signal_lis:
                 np.savetxt(outfile, data_slice, fmt='%-8.4f')
                 outfile.write('# New z slice\n')
-               
-        return
-        
-if __name__ == "__main__":
-    rng_seed = sys.argv[1]
-    print("RAND: ", rng_seed)
-    torch.manual_seed(rng_seed)
-    if torch.cuda.is_available():
-        torch.cuda.set_device(0)
-    print("GPU: ", torch.cuda.get_device_name(0))
-    fdr = Model1('../../data/model1/' + str(rng_seed) +'/x_val.txt', rng_seed)
-    fdr.gem()
-    gamma_file = '../../data/model1/' + str(rng_seed) +'/result' +'/gamma.txt'
-    label_file = '../../data/model1/' + str(rng_seed) +'/label/label.txt'
-    fdr.p_lis(np.loadtxt(gamma_file).reshape((Data.VOXEL_SIZE,Data.VOXEL_SIZE,Data.VOXEL_SIZE)),
-             np.loadtxt(label_file).reshape((Data.VOXEL_SIZE,Data.VOXEL_SIZE,Data.VOXEL_SIZE)))
-
 
 

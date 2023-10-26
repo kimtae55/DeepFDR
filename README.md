@@ -1,5 +1,7 @@
 # DeepFDR
 
+The `deepfdr` package provides an unsupervised deep learning method for voxel-based multiple testing. We leverage [title](link)
+
 ## Table of Contents
 * [Overview](#overview)
 * [Folder Structure](#Folder-Structure)

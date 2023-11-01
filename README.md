@@ -7,9 +7,6 @@ The Pytorch based `deepfdr` package provides a fully unsupervised deep learning 
 * [Usage](#usage)
 
 ## Installation
-The project uses ```Python 3.8```.
-
-There are some files > 5GB, so please download the code using Dropbox link: [DeepFDR](https://www.dropbox.com/sh/9378gmgy8fb97r9/AABRmGsDHwtiNXH_W55w-igna?dl=0)
 
 ## SmoothFDR Installation for Linux & HPC users (Singularity with Miniconda)
 For any users that use Singularity with Miniconda in an HPC environment, you may find the below steps useful for installing required packages at the right locations:

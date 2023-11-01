@@ -1,6 +1,6 @@
 # DeepFDR
 
-The `deepfdr` package provides an unsupervised deep learning method for voxel-based multiple testing. We utilize the [W-Net]([link](https://arxiv.org/abs/1711.08506)) to connect unsupervised image segmentation to a 3D multiple testing problem that enables false discovery rate (FDR) control with a significant boost in statistical power. We test our methodology using test statistics generated from FDG-PET data available at [ADNI database](https://adni.loni.usc.edu/). 
+The `deepfdr` package provides an unsupervised deep learning method for voxel-based multiple testing. We utilize the [W-Net](https://arxiv.org/abs/1711.08506) to connect unsupervised image segmentation to a 3D multiple testing problem that enables false discovery rate (FDR) control with a significant boost in statistical power. We test our methodology using test statistics generated from FDG-PET data available at [ADNI database](https://adni.loni.usc.edu/). 
 
 ## Table of Contents
 * [Overview](#overview)

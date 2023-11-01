@@ -4,7 +4,7 @@ The Pytorch based `deepfdr` package provides a fully unsupervised deep learning 
 
 ## Table of Contents
 * [Installation](#requirements-and-installation)
-* [Example](#example)
+* [Usage](#usage)
 
 ## Installation
 The project uses ```Python 3.8```.
@@ -21,5 +21,5 @@ For any users that use Singularity with Miniconda in an HPC environment, you may
 6) Copy the library to a folder, then set its PATH ```export LD_LIBRARY_PATH=/ext3/local/lib:$LD_LIBRARY_PATH```
 7) Use ```python setup.py build``` and ```python setup.py install``` to install pygfl and smoothfdr packages
 
-## Example
+## Usage
 

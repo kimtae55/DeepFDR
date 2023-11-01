@@ -1,6 +1,6 @@
 # DeepFDR
 
-The Pytorch based `deepfdr` package provides a fully unsupervised deep learning method for voxel-based multiple testing. We utilize the [W-Net](https://arxiv.org/abs/1711.08506) and the concept of [local index of significance (LIS)](https://academic.oup.com/jrsssb/article/71/2/393/7092902) to connect unsupervised image segmentation to a 3D multiple testing problem that enables false discovery rate (FDR) control with a significant boost in statistical power. We test our methodology using test statistics generated from FDG-PET data available at [ADNI database](https://adni.loni.usc.edu/). For specific details on methodology or training, please refer to our [paper](https://arxiv.org/abs/2310.13349v1). 
+The Pytorch based `deepfdr` package provides a fully unsupervised deep learning method for voxel-based multiple testing. We utilize the [W-Net](https://arxiv.org/abs/1711.08506) and the concept of [local index of significance (LIS)](https://academic.oup.com/jrsssb/article/71/2/393/7092902) to connect unsupervised image segmentation to a 3D multiple testing problem that enables false discovery rate (FDR) control with a significant boost in statistical power. We test our methodology using test statistics generated from FDG-PET data available at [ADNI database](https://adni.loni.usc.edu/). For specific details on methodology or training, please refer to our [paper](https://arxiv.org/abs/2310.13349v1) on arxiv. 
 
 ## Table of Contents
 * [Installation](#requirements-and-installation)

@@ -12,6 +12,7 @@ import scipy
 from statsmodels.stats.multitest import local_fdr, NullDistribution
 import os 
 import time
+np.bool = np.bool_
 
 class EarlyStop:
     def __init__(self, patience: int = 3, threshold: float = 1e-2) -> None:
@@ -32,7 +33,7 @@ class EarlyStop:
             return False
         if train_loss is None:
             return False
-        # self.queue.append(train_loss)
+
         if np.less(train_loss - self.best_loss, -self.threshold):
             self.best_loss = train_loss
             self.wait = 0
@@ -275,12 +276,12 @@ def p_lis(gamma_1, threshold=0.1, label=None, savepath=None, flip=False):
         # GT FDP
         rx = k
         sigx = np.sum(1-label[lis[:k]['index']])
-        fdr = sigx / rx
+        fdr = sigx / rx if rx > 0 else 0
 
         # GT FNR
         rx = size - k
         sigx = np.sum(label[lis[k:]['index']]) 
-        fnr = sigx / rx
+        fnr = sigx / rx if rx > 0 else 0
 
         # GT ATP
         atp = np.sum(label[lis[:k]['index']]) 

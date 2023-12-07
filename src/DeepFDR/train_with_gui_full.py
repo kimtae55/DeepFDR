@@ -18,28 +18,22 @@ from torchinfo import summary
 import random
 from util import SoftNCutLoss3D, FDR_MSELoss, compute_qval, p_lis, dice
 import time  
+import multiprocessing
+from multiprocessing import Queue, Event
 
-def main():
-    parser = argparse.ArgumentParser(description='DeepFDR using W-NET')
-    parser.add_argument('--lr', default=1e-3, type=float)
-    parser.add_argument('--l2', default=1e-5, type=float)
-    parser.add_argument('--momentum', default=0.9, type=float)
-    parser.add_argument('--datapath', type=str)
-    parser.add_argument('--labelpath', default='./', type=str)
-    parser.add_argument('--savepath', default='./', type=str)
-    parser.add_argument('--loss', default='pv_mse', type=str) # x_mse or pv_mse
-    parser.add_argument('--mode', default=2, type=int) # 0 for train, 1 for inference, 2 for both
-    args = parser.parse_args()
+# TODO: have two separate train(), one without these events for non_gui runs
+def train(queue, continue_training_flag, save_flag, save_exit_flag, args):
+    Config.datapath = args.datapath
+    Config.labelpath = args.labelpath
+    Config.savepath = args.savepath
+    Config.replications = 1 # we're just visualizing for one replication, otherwise the for loop logic needs to be changed
+                            # i'm not removing the for loop for now, to make it easier to read compared to train.main
+    Config.epochs = 100 # This is a big number, to allow the user to save results then exit when satisfied without being limited by # of epochs. 
 
-    config = Config()
-    config.datapath = args.datapath
-    config.labelpath = args.labelpath
-    config.savepath = args.savepath
-
-    random.seed(config.seed)
-    np.random.seed(config.seed)
-    torch.manual_seed(config.seed)
-    torch.cuda.manual_seed_all(config.seed)
+    random.seed(Config.seed)
+    np.random.seed(Config.seed)
+    torch.manual_seed(Config.seed)
+    torch.cuda.manual_seed_all(Config.seed)
 
     method_dict = {
         'deepfdr': 0,
@@ -57,28 +51,27 @@ def main():
         metric['atp'][method_index].append(atp)
 
     start = time.time()
-    for i in range(config.replications):
+    for i in range(Config.replications):
         print('-----------------------------------------------')
         print('-------------------------------- RUN_NUMBER: ',i)
         print('-----------------------------------------------')
 
         if args.mode == 1:
-            model_name = 'lr_' + str(args.lr) + '.pth'
-            r = compute_statistics(args, config, model_name)
+            model_name = 'lr_' + str(args.lr) + '.pth' # change this to argparser
+            r = compute_statistics(args, model_name) 
             print(f'epoch result: {r[0]},{r[1]},{r[2]}')
 
         elif args.mode == 2:
-            config.sample_number = i+2
-            single_training(args, config)
-            model_name = 'lr_' + str(args.lr) + '.pth'
-            r = compute_statistics(args, config, model_name)
+            Config.sample_number = i
+            model_name = single_training(queue, continue_training_flag, save_flag, save_exit_flag, args, Config)
+            r = compute_statistics(args, model_name)
             print(f'epoch result: {r[0]},{r[1]},{r[2]}')
 
             # aggregate results
             add_result(r[0], r[1], r[2], 0) # deepfdr
 
     end = time.time()
-    print('DL computation time: ', (end-start)/config.replications)
+    print('DL computation time: ', (end-start)/Config.replications)
 
     for key, val in metric.items():
         print(key)
@@ -95,32 +88,39 @@ def main():
         outfile.write(f'fnr: {mfnr} ({sfnr})\n')
         outfile.write(f'atp: {matp} ({satp})\n')
 
+    save_exit_flag.clear() # use this clear signal to stop the dash server
+
 def weights_init(m): 
     classname = m.__class__.__name__
     if classname.find('Conv') != -1:
         nn.init.kaiming_normal_(m.weight, mode='fan_out', nonlinearity='relu')
 
-def single_training(args, config):
+def single_training(queue, continue_training_flag, save_flag, save_exit_flag, args, Config):
+    end_training = False
+
+    if not os.path.exists(args.savepath):
+        os.makedirs(args.savepath)
+
     if torch.cuda.is_available(): 
         torch.cuda.empty_cache() # clear gpu cache
 
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
-    trainLossEnc_plot = np.zeros(config.epochs)
-    trainLossDec_plot = np.zeros(config.epochs)
+    trainLossEnc_plot = []
+    trainLossDec_plot = []
 
-    fdp_opt_1_plot = np.zeros(config.epochs)
-    fdp_opt_2_plot = np.zeros(config.epochs)
+    fdp_opt_1_plot = []
+    fdp_opt_2_plot = []
 
-    trainset = DataLoader("train", config, args)
-    trainloader = Data.DataLoader(trainset.dataset, batch_size = config.batch_size, shuffle = config.shuffle, num_workers = config.loadThread, pin_memory = True)
+    trainset = DataLoader("train", Config, args)
+    trainloader = Data.DataLoader(trainset.dataset, batch_size = Config.batch_size, shuffle = Config.shuffle, num_workers = Config.loadThread, pin_memory = True)
 
     earlyStop = EarlyStop()
 
     global net
-    net=WNet(config.num_classes)
+    net=WNet(Config.num_classes)
     net.apply(weights_init)
-    #summary(net)
+    summary(net)
 
     if torch.cuda.is_available():
         net=net.cuda()
@@ -133,55 +133,78 @@ def single_training(args, config):
     lr_scheduler_w = torch.optim.lr_scheduler.ExponentialLR(optimizer_w, gamma=1.0)
     lr_scheduler_e = torch.optim.lr_scheduler.ExponentialLR(optimizer_e, gamma=1.0)
 
-    for epoch in range(config.epochs):  # loop over the dataset multiple times
+    for epoch in range(Config.epochs):  # loop over the dataset multiple times
+        # Check if the user has clicked the "Continue Training" button
+        continue_training_flag.clear()
+
+        # event interactions 
+        print("Training paused, click Continue to resume training...")
+        while not continue_training_flag.is_set():
+            if save_exit_flag.is_set() and epoch > 0:
+                end_training = True
+                print("Saving and exiting training...")
+                break
+
+            if save_flag.is_set() and epoch > 0:
+                print('Saved!')
+                model_name = 'lr_' + str(args.lr) + '_' + str(epoch-1) + '.pth'
+                torch.save(net.state_dict(), os.path.join(args.savepath, model_name))
+                save_flag.clear()
+
+            continue_training_flag.wait(timeout=0.5) # Check every 0.5 second
+
+
+        if end_training:
+            print("Exiting out of training loop")
+            break
+
+        print("Training resumed...")
+
         start_time = time.time()
-        tle, tld, fdps = train_epoch_whole(trainloader, optimizer_w, optimizer_e, args, config)
-        fdp_opt_1, fdp_opt_2 = fdps
-        #lr_scheduler_w.step()
-        #lr_scheduler_e.step()
+        tle, tld, fdps = train_epoch_whole(trainloader, optimizer_w, optimizer_e, args, Config)
+        fdp_opt_1, fdp_opt_2, signal_lis = fdps
         end_time = time.time()
 
         # print statistics
-        trainLossEnc_plot[epoch] = tle
-        trainLossDec_plot[epoch] = tld
-        fdp_opt_1_plot[epoch] = fdp_opt_1
-        fdp_opt_2_plot[epoch] = fdp_opt_2
-        print("#%d: epoch_time: %8.2f, ~time_left: %8.2f" % (epoch, end_time-start_time, (end_time-start_time)*(config.epochs - epoch)))
+        trainLossEnc_plot.append(tle)
+        trainLossDec_plot.append(tld)
+        fdp_opt_1_plot.append(fdp_opt_1)
+        fdp_opt_2_plot.append(fdp_opt_2)
+        print("#%d: epoch_time: %8.2f" % (epoch, end_time-start_time))
         print("\ttrain_l_e: %5.3f, train_l_d: %5.3f " % (tle, tld))
         print("\tfdp_opt_1: %5.3f" % (fdp_opt_1))
         print("\tfdp_opt_2: %5.3f" % (fdp_opt_2))
 
-        # Early stop
-        #if earlyStop(train_loss_enc):
-        #    print("Early stop activated.")
-        #    break
+        # Get the Queue ready
+        queue.put(np.array(trainLossEnc_plot))
+        queue.put(np.array(fdp_opt_1_plot))
+        queue.put(signal_lis)
+
 
     # save trained model
-    model_name = 'lr_' + str(args.lr) + '.pth'
-    loss_name = 'lr_' + str(args.lr) + '.png'
-    savepath = args.savepath
-    if not os.path.exists(savepath):
-        os.makedirs(savepath)
+    model_name = 'lr_' + str(args.lr) + '_' + str(epoch-1) + '.pth'
+    loss_name = 'lr_' + str(args.lr) + '_' + str(epoch-1) + '.png'
 
-    torch.save(net.state_dict(), os.path.join(savepath, model_name))
+    torch.save(net.state_dict(), os.path.join(args.savepath, model_name))
 
-    timex = np.arange(0, epoch+1, 1)
+    timex = list(range(epoch))
 
     fig, axs = plt.subplots(2, 1, figsize=(8, 8), sharey=False)
-    axs[0].plot(timex, trainLossEnc_plot[0:epoch+1], color='r', label='enc_loss')
-    axs[0].plot(timex, trainLossDec_plot[0:epoch+1], color='orange', label='dec_loss')
-    axs[1].plot(timex, fdp_opt_1_plot[0:epoch+1], color='g', label='FDP_p_option_1')
-    axs[1].plot(timex, fdp_opt_2_plot[0:epoch+1], color='blue', label='FDP_p_option_2')
+    axs[0].plot(timex, trainLossEnc_plot, color='r', label='enc_loss')
+    axs[0].plot(timex, trainLossDec_plot, color='orange', label='dec_loss')
+    axs[1].plot(timex, fdp_opt_1_plot, color='g', label='FDP_p_option_1')
+    axs[1].plot(timex, fdp_opt_2_plot, color='blue', label='FDP_p_option_2')
     axs[0].set(xlabel=r'epochs', ylabel='loss')
     axs[1].set(xlabel=r'epochs', ylabel='FDP')
     axs[0].grid(linewidth=0.5)
     axs[1].grid(linewidth=0.5)
     fig.legend(loc='lower right')
-    plt.savefig(os.path.join(savepath, loss_name))
+    plt.savefig(os.path.join(args.savepath, loss_name))
 
-    print('Finished Training')
+    print('Finishing Training...')
+    return model_name
 
-def compute_fdp_hat(data, p, qv, args, config):
+def compute_fdp_hat(data, p, qv, args):
     """
     Computes an overestimation of fdp using two different methods. 
     These estimations can be used along with early stop to monitor training internally. 
@@ -190,24 +213,30 @@ def compute_fdp_hat(data, p, qv, args, config):
     global net
     net.eval() # crucial!
     enc = net(data, returns='enc')
-    gamma_1 = torch.squeeze(enc).detach().numpy().ravel()
-    qv_np = torch.squeeze(qv).detach().numpy().ravel()
-    p_np = torch.squeeze(p).detach().numpy().ravel()  
-    label = np.ravel(np.load(config.labelpath)[config.cluster_number])
+    gamma_1 = torch.squeeze(enc).detach().cpu().numpy().ravel()
+    qv_np = torch.squeeze(qv).detach().cpu().numpy().ravel()
+    qv_signals = np.where(qv_np <= Config.threshold, 1, 0)
+    p_np = torch.squeeze(p).detach().cpu().numpy().ravel()  
+    label = np.ravel(np.load(Config.labelpath)[Config.cluster_number])
 
     size = gamma_1.size
-    
-    k_flip, lis_flip = p_lis(gamma_1=gamma_1, threshold=config.threshold, flip=True)
-    k_noflip, lis_noflip = p_lis(gamma_1=gamma_1, threshold=config.threshold, flip=False)
+    fdr, fnr, atp = p_lis(gamma_1=gamma_1, threshold=Config.threshold, label=label, flip=True)
+    print('flip=True STATS: ', fdr, fnr, atp)
+    fdr, fnr, atp = p_lis(gamma_1=gamma_1, threshold=Config.threshold, label=label, flip=False)
+    print('flip=False STATS: ', fdr, fnr, atp)
+
+    k_flip, lis_flip = p_lis(gamma_1=gamma_1, threshold=Config.threshold, flip=True)
+    k_noflip, lis_noflip = p_lis(gamma_1=gamma_1, threshold=Config.threshold, flip=False)
 
     sl_flip = np.zeros(gamma_1.size)
     sl_flip[lis_flip[:k_flip]['index']] = 1
     sl_noflip = np.zeros(gamma_1.size)
     sl_noflip[lis_noflip[:k_noflip]['index']] = 1
 
-    dice_flip = dice(qv_np, sl_flip)
-    dice_noflip = dice(qv_np, sl_noflip)
+    dice_flip = dice(qv_signals, sl_flip)
+    dice_noflip = dice(qv_signals, sl_noflip)
 
+    print('DICE:', dice_noflip, dice_flip)
     if dice_noflip > dice_flip: # this one is correct 
         lis = lis_noflip
         k = k_noflip
@@ -218,7 +247,10 @@ def compute_fdp_hat(data, p, qv, args, config):
     # get k
     lis = np.sort(lis, order='value')
     cumulative_sum = np.cumsum(lis[:]['value'])
-    k = np.argmax(cumulative_sum > (np.arange(len(lis)) + 1)*config.threshold)
+    k = np.argmax(cumulative_sum > (np.arange(len(lis)) + 1)*Config.threshold)
+
+    signal_lis = np.zeros(size)
+    signal_lis[lis[:k]['index']] = 1
 
     # fdp_opt_1
     m = 27000 # 439758 for real data analysis Don't forget!!!
@@ -242,9 +274,9 @@ def compute_fdp_hat(data, p, qv, args, config):
     p_h_0 = (tau_m + 1) / (m*(1-p_mtau))
     fdp_opt_2 = p_h_0 * sigx / rx if rx > 0 else 0
 
-    return (fdp_opt_1, fdp_opt_2)
+    return (fdp_opt_1, fdp_opt_2, signal_lis)
 
-def train_epoch_whole(trainloader, optimizer_w, optimizer_e, args, config):
+def train_epoch_whole(trainloader, optimizer_w, optimizer_e, args, Config):
     global net
     net.train()
 
@@ -286,18 +318,18 @@ def train_epoch_whole(trainloader, optimizer_w, optimizer_e, args, config):
         train_loss_dec += rec_loss.item()
 
     net.eval()
-    fdps = compute_fdp_hat(inputs, y_1, y_2, args, config)
+    fdps = compute_fdp_hat(inputs, y_1, y_2, args)
 
     return train_loss_enc, train_loss_dec, fdps
 
 
-def compute_statistics(args, config, model_name):
-    data = np.load(os.path.join(args.datapath))[config.sample_number:config.sample_number+1].reshape((-1,)+config.inputsize)
-    label = np.ravel(np.load(config.labelpath)[config.cluster_number])
+def compute_statistics(args, model_name):
+    data = np.load(os.path.join(args.datapath))[Config.sample_number:Config.sample_number+1].reshape((-1,)+Config.inputsize)
+    label = np.ravel(np.load(Config.labelpath)[Config.cluster_number])
     
     def predict_for_wnet():
         # Model setup 
-        model = WNet(config.num_classes)
+        model = WNet(Config.num_classes)
         if torch.cuda.is_available():
             model = model.cuda()
 
@@ -315,27 +347,26 @@ def compute_statistics(args, config, model_name):
         dl_gamma = torch.squeeze(enc).detach().cpu().numpy()  
         return dl_gamma 
 
-    q_rejected = compute_qval(data, config.threshold)
+    q_rejected = compute_qval(data, Config.threshold)
+    qv_signals = np.where(q_rejected <= Config.threshold, 1, 0)
 
     gamma_1 = predict_for_wnet()
-    k_flip, lis_flip = p_lis(gamma_1=gamma_1, threshold=config.threshold, flip=True)
-    k_noflip, lis_noflip = p_lis(gamma_1=gamma_1, threshold=config.threshold, flip=False)
+    k_flip, lis_flip = p_lis(gamma_1=gamma_1, threshold=Config.threshold, flip=True)
+    k_noflip, lis_noflip = p_lis(gamma_1=gamma_1, threshold=Config.threshold, flip=False)
 
     sl_flip = np.zeros(gamma_1.size)
     sl_flip[lis_flip[:k_flip]['index']] = 1
     sl_noflip = np.zeros(gamma_1.size)
     sl_noflip[lis_noflip[:k_noflip]['index']] = 1
 
-    dice_flip = dice(q_rejected, sl_flip)
-    dice_noflip = dice(q_rejected, sl_noflip)
+    dice_flip = dice(qv_signals, sl_flip)
+    dice_noflip = dice(qv_signals, sl_noflip)
 
     if dice_noflip < dice_flip:  
         flip = True
     else: 
         flip = False
 
-    fdr, fnr, atp = p_lis(gamma_1=gamma_1, threshold=config.threshold, label=label, savepath=os.path.join(args.savepath, 'auto_' + os.path.splitext(model_name)[0]), flip=flip)
+    fdr, fnr, atp = p_lis(gamma_1=gamma_1, threshold=Config.threshold, label=label, savepath=os.path.join(args.savepath, 'auto_' + os.path.splitext(model_name)[0]), flip=flip)
     return (fdr, fnr, atp)
 
-if __name__ == "__main__":
-    main()

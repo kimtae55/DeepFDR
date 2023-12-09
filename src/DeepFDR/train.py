@@ -188,10 +188,6 @@ def compute_fdp_hat(data, p, qv, args, config):
     label = np.ravel(np.load(config.labelpath)[config.cluster_number])
 
     size = gamma_1.size
-    fdr, fnr, atp = p_lis(gamma_1=gamma_1, threshold=config.threshold, label=label, flip=True)
-    print('flip=True STATS: ', fdr, fnr, atp)
-    fdr, fnr, atp = p_lis(gamma_1=gamma_1, threshold=config.threshold, label=label, flip=False)
-    print('flip=False STATS: ', fdr, fnr, atp)
 
     k_flip, lis_flip = p_lis(gamma_1=gamma_1, threshold=config.threshold, flip=True)
     k_noflip, lis_noflip = p_lis(gamma_1=gamma_1, threshold=config.threshold, flip=False)

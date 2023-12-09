@@ -9,7 +9,6 @@ class Config:
     epochs = 17
     num_classes = 1
     seed = 0
-    data_mode = "single" # "single" or "multi"
     #multiple testing configure
     threshold = 0.1
     replications = 5 # matches the sample_size for x

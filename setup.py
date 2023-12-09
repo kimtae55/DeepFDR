@@ -7,7 +7,7 @@ setup(
     description='FDR Control method using deep unsupervised segmentation',
     long_description=open('README.md').read(),
     long_description_content_type='text/markdown',
-    author='Project is maintained by Taehyo Kim',
+    author='The repository is maintained by Taehyo Kim',
     author_email='tk2737.nyu.edu',
     url='https://github.com/kimtae55/DeepFDR',
     install_requires=[

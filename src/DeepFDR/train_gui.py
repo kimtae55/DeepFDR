@@ -354,7 +354,6 @@ if __name__ == '__main__':
     parser.add_argument('--savepath', default='./', type=str)
     parser.add_argument('--loss', default='pv_mse', type=str) # x_mse or pv_mse
     parser.add_argument('--mode', default=2, type=int) # 0 for train, 1 for inference, 2 for both
-    parser.add_argument('--enable_gui', default=False, action='store_true', help='Enable GUI if this flag is set')
     _args = parser.parse_args()
 
     q = Queue()
@@ -362,21 +361,16 @@ if __name__ == '__main__':
     save_exit_flag = Event()
     save_flag = Event()
 
-    # Start the GUI app
-    if _args.enable_gui:
-        # Create and start the training process
-        train_process = multiprocessing.Process(target=train_with_gui_full.train, args=(q,continue_training_flag, save_flag, save_exit_flag, _args))
-        train_process.start()
+    # Create and start the training process
+    train_process = multiprocessing.Process(target=train_with_gui_full.train, args=(q,continue_training_flag, save_flag, save_exit_flag, _args))
+    train_process.start()
 
-        logger = logging.getLogger('werkzeug')  # Werkzeug is the underlying server for Dash
-        logger.setLevel(logging.ERROR)
-        app = dash.Dash(__name__, update_title=None)
-        server = app.server
+    logger = logging.getLogger('werkzeug')  # Werkzeug is the underlying server for Dash
+    logger.setLevel(logging.ERROR)
+    app = dash.Dash(__name__, update_title=None)
+    server = app.server
 
-        setup_dash()
-        app.run_server(debug=False)
-    else:
-        #train_process = multiprocessing.Process(target=train_unet_mlp.main, args=(_args,))
-        train_process = multiprocessing.Process(target=train.main, args=(_args,))
-        train_process.start()
+    setup_dash()
+    app.run_server(debug=False)
+
 

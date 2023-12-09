@@ -6,7 +6,7 @@ The `deepfdr` package provides a fully unsupervised, deep learning based FDR con
 * [Requirements and Installation](#requirements-and-installation)
 * [Usage](#usage)
 
-## Installation
+## Requirements and Installation
 This package was developed using Python 3.9 and Pytorch 1.10.1 - please install the compatible version of Pytorch at [https://pytorch.org/](https://pytorch.org/).
 To install the package, please run the following lines:
 ```bash
@@ -28,5 +28,5 @@ python train.py --labelpath {optional groundtruth file if using for simulation}
                 --datapath {input test statistics file}
                 --savepath {directory path for saving results}
 ```
-
+We have also included ready-to-use source code for competing methods presented in our [paper](https://arxiv.org/abs/2310.13349v1), namely the BH, Q-value, LocalFDR, HMRF-LIS, NeuralFDR, SmoothFDR, OrderShapeEM, and LAWS.
 

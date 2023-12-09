@@ -7,7 +7,8 @@ The Pytorch based `deepfdr` package provides a fully unsupervised deep learning 
 * [Usage](#usage)
 
 ## Installation
-This package was developed using Python 3.9 and Pytorch 1.10.1 - please install the compatible version of Pytorch at [https://pytorch.org/](https://pytorch.org/)
+This package was developed using Python 3.9 and Pytorch 1.10.1 - please install the compatible version of Pytorch at [https://pytorch.org/](https://pytorch.org/).
+
 To install the package, please run the following lines:
 ```bash
 git clone [https://github.com/rmarkello/snfpy.git](https://github.com/kimtae55/DeepFDR)

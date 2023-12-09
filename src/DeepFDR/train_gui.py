@@ -16,7 +16,7 @@ import numpy as np
 import plotly.express as px
 import multiprocessing
 from multiprocessing import Queue, Event
-import train_with_gui_full
+import train_gui_helper
 import train 
 from flask import request
 import signal
@@ -362,7 +362,7 @@ if __name__ == '__main__':
     save_flag = Event()
 
     # Create and start the training process
-    train_process = multiprocessing.Process(target=train_with_gui_full.train, args=(q,continue_training_flag, save_flag, save_exit_flag, _args))
+    train_process = multiprocessing.Process(target=train_gui_helper.train, args=(q,continue_training_flag, save_flag, save_exit_flag, _args))
     train_process.start()
 
     logger = logging.getLogger('werkzeug')  # Werkzeug is the underlying server for Dash

@@ -23,11 +23,15 @@ For any users that use Singularity with Miniconda in an HPC environment, you may
 ## Usage
 The software offers two distinct training modalities: an interactive training interface leveraging Dash and Plotly for a dynamic, web-app-based training, and a standalone training option for those preferring operation without the web application. If one wants to activate the GUI, use the ```train_gui``` module:
 ```bash
-python train_gui.py --labelpath {optional groundtruth file if using for simulation} --datapath {input test statistics file} --savepath {directory path for saving results}
+python train_gui.py --labelpath {optional groundtruth file if using for simulation}
+                    --datapath {input test statistics file}
+                    --savepath {directory path for saving results}
 ```
 If one wants to train without visualization, use the ```train``` module:
 ```bash
-python train_gui.py --labelpath {optional groundtruth file if using for simulation} --datapath {input test statistics file} --savepath {directory path for saving results}
+python train.py --labelpath {optional groundtruth file if using for simulation}
+                --datapath {input test statistics file}
+                --savepath {directory path for saving results}
 ```
 
 

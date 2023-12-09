@@ -7,8 +7,13 @@ The Pytorch based `deepfdr` package provides a fully unsupervised deep learning 
 * [Usage](#usage)
 
 ## Installation
-Installation Intructions are coming soon...
-Package is in construction along with a web-based visualization tool for training monitoring...
+This package was developed using Python 3.9 and Pytorch 1.10.1 - please install the compatible version of Pytorch at [https://pytorch.org/](https://pytorch.org/)
+
+```bash
+git clone https://github.com/rmarkello/snfpy.git
+cd snfpy
+python setup.py install
+```
 
 ## SmoothFDR Installation for Linux & HPC users (Singularity with Miniconda)
 For any users that use Singularity with Miniconda in an HPC environment, you may find the below steps useful for installing required packages at the right locations:

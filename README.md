@@ -10,7 +10,7 @@ The `deepfdr` package provides a fully unsupervised, deep learning based FDR con
 This package was developed using Python 3.9 and Pytorch 1.10.1 - please install the compatible version of Pytorch at [https://pytorch.org/](https://pytorch.org/).
 To install the package, please run the following lines:
 ```bash
-git clone [https://github.com/kimtae55/DeepFDR](https://github.com/kimtae55/DeepFDR)
+git clone https://github.com/kimtae55/DeepFDR
 cd $PATH_TO_DeepFDR$
 python setup.py install
 ```

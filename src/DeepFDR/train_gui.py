@@ -34,8 +34,10 @@ def setup_dash():
     slicer1 = VolumeSlicer(app, vol, axis=1)
     slicer2 = VolumeSlicer(app, vol, axis=2)
 
-    your_2d_plot1_figure = px.line(x=[None], y=[None], title="Loss function monitor", width=400, height=200, markers=True)
-    your_2d_plot2_figure = px.line(x=[None], y=[None], title="FDP overestimation monitor", width=400, height=200, markers=True)
+    your_2d_plot1_figure = px.line(x=[None], y=[None], title="Loss function monitor", width=400, height=200, markers=True
+                , labels={'x':'epoch', 'y':'loss'})
+    your_2d_plot2_figure = px.line(x=[None], y=[None], title="FDP overestimation monitor", width=400, height=200, markers=True
+        , labels={'x':'epoch', 'y':'FDP'})
     your_2d_plot1_figure.update_layout(
         margin=dict(l=30, r=30, t=30, b=30) # Adjust margins as needed
     )
@@ -304,8 +306,10 @@ def setup_dash():
             vol = q.get_nowait()
             vol = vol.reshape(Config.inputsize)
 
-            updated_2d_plot1_figure = px.line(x=list(range(1, len(plot1_y) + 1)), y=plot1_y, title="Loss function monitor", width=400, height=200, markers=True)
-            updated_2d_plot2_figure = px.line(x=list(range(1, len(plot1_y) + 1)), y=plot2_y, title="FDP overestimation monitor", width=400, height=200, markers=True)
+            updated_2d_plot1_figure = px.line(x=list(range(1, len(plot1_y) + 1)), y=plot1_y, title="Loss function monitor", width=400, height=200, markers=True
+                                    , labels={'x':'epoch', 'y':'FDP'})
+            updated_2d_plot2_figure = px.line(x=list(range(1, len(plot1_y) + 1)), y=plot2_y, title="FDP overestimation monitor", width=400, height=200, markers=True
+                                    , labels={'x':'epoch', 'y':'FDP'})
 
             # Create the graph (graph is a Dash component wrapping a Plotly figure) 
             try:

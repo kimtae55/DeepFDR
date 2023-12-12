@@ -28,5 +28,4 @@ python train.py --labelpath {optional groundtruth file if using for simulation}
                 --datapath {input test statistics file}
                 --savepath {directory path for saving results}
 ```
-We have also included ready-to-use source code for competing methods presented in our [paper](https://arxiv.org/abs/2310.13349v1), namely the BH, Q-value, LocalFDR, HMRF-LIS, NeuralFDR, SmoothFDR, OrderShapeEM, and LAWS.
 

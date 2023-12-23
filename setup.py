@@ -14,7 +14,6 @@ setup(
         'argparse',
         'numpy',
         'torchinfo',
-        'multiprocessing',
         'plotly',
         'dash',
         'dash_slicer',
@@ -22,6 +21,7 @@ setup(
         'imageio',
         'flask',
         'statsmodels',
-        'scipy'
+        'scipy',
+        'plotly'
     ],
 )

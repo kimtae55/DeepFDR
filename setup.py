@@ -18,7 +18,7 @@ setup(
         'plotly',
         'dash',
         'dash_slicer',
-        'skimage',
+        'scikit-image',
         'imageio',
         'flask',
         'statsmodels',

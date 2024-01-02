@@ -7,7 +7,7 @@ T. Kim, H. Shu, Q. Jia, and M. de Leon (2023). [DeepFDR: A Deep Learning-based F
 ## Table of Contents
 * [Requirements and Installation](#requirements-and-installation)
 * [Usage](#usage)
-* [Uddates](#update)
+* [Updates](#update)
 
 ## Requirements and Installation
 This package was developed using Python 3.9 and Pytorch 1.10.1 - please install the compatible version of Pytorch at [https://pytorch.org/](https://pytorch.org/).

@@ -34,4 +34,4 @@ python train.py --labelpath {optional groundtruth file if using for simulation}
                 --datapath {input test statistics file}
                 --savepath {directory path for saving results}
 ```
-
+![gui_image](https://github.com/kimtae55/DeepFDR/blob/main/figs/gui_example.png)

@@ -34,7 +34,7 @@ python train.py --labelpath {optional groundtruth file if using for simulation}
                 --datapath {input test statistics file}
                 --savepath {directory path for saving results}
 ```
-The following figure shows what the training monitor will look like:   
+The following figure illustrates a training session, where the dashed red line indicates the nominal FDR threshold:
 ![gui_image](https://github.com/kimtae55/DeepFDR/blob/main/figs/gui_example.png)
 
 

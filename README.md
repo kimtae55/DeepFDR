@@ -7,6 +7,7 @@ T. Kim, H. Shu, Q. Jia, and M. de Leon (2023). [DeepFDR: A Deep Learning-based F
 ## Table of Contents
 * [Requirements and Installation](#requirements-and-installation)
 * [Usage](#usage)
+* [Uddates](#update)
 
 ## Requirements and Installation
 This package was developed using Python 3.9 and Pytorch 1.10.1 - please install the compatible version of Pytorch at [https://pytorch.org/](https://pytorch.org/).
@@ -37,4 +38,5 @@ python train.py --labelpath {optional groundtruth file if using for simulation}
 The following figure illustrates a training session, where the dashed red line indicates the nominal FDR threshold:
 ![gui_image](https://github.com/kimtae55/DeepFDR/blob/main/figs/gui_example.png)
 
-
+## Updates
+New updates to improving the model, app stability and user experience will be posted here. 

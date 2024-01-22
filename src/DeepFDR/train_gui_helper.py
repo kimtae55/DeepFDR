@@ -177,6 +177,7 @@ def single_training(queue, continue_training_flag, save_flag, save_exit_flag, ar
 
         # Get the Queue ready
         queue.put(np.array(trainLossEnc_plot))
+        queue.put(np.array(trainLossDec_plot))
         queue.put(np.array(fdp_opt_1_plot))
         queue.put(signal_lis)
 

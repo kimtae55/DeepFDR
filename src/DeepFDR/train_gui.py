@@ -28,15 +28,15 @@ import time
 
 def setup_dash():
     # Read volumes and create slicer objects
-    vol = np.random.rand(30,30,30)
+    vol = np.random.rand(Config.inputsize[0],Config.inputsize[1],Config.inputsize[2])
 
     slicer0 = VolumeSlicer(app, vol, axis=0)
     slicer1 = VolumeSlicer(app, vol, axis=1)
     slicer2 = VolumeSlicer(app, vol, axis=2)
 
-    your_2d_plot1_figure = px.line(x=[None], y=[None], title="Loss function monitor", width=400, height=200, markers=True
+    your_2d_plot1_figure = px.line(x=[None], y=[None], title="Loss Monitor", width=400, height=200, markers=True
                 , labels={'x':'epoch', 'y':'loss'})
-    your_2d_plot2_figure = px.line(x=[None], y=[None], title="FDP overestimation monitor", width=400, height=200, markers=True
+    your_2d_plot2_figure = px.line(x=[None], y=[None], title="Estimated FDP", width=400, height=200, markers=True
         , labels={'x':'epoch', 'y':'FDP'})
     your_2d_plot2_figure.add_hline(y=Config.threshold, line_dash="dash", line_color="red")
 
@@ -305,14 +305,41 @@ def setup_dash():
             if q.empty():
                 return (dash.no_update,) * 6
 
-            plot1_y = q.get_nowait()
-            plot2_y = q.get_nowait()
+            u1_loss = q.get_nowait()
+            u2_loss = q.get_nowait()
+            fdp_est = q.get_nowait()
             vol = q.get_nowait()
             vol = vol.reshape(Config.inputsize)
 
-            updated_2d_plot1_figure = px.line(x=list(range(1, len(plot1_y) + 1)), y=plot1_y, title="Loss function monitor", width=400, height=200, markers=True
-                                    , labels={'x':'epoch', 'y':'loss'})
-            updated_2d_plot2_figure = px.line(x=list(range(1, len(plot1_y) + 1)), y=plot2_y, title="FDP overestimation monitor", width=400, height=200, markers=True
+            updated_2d_plot1_figure = go.Figure()
+            updated_2d_plot1_figure.add_trace(
+                go.Scatter(
+                    x=list(range(1, len(u1_loss) + 1)),
+                    y=u1_loss,
+                    mode='lines+markers',  # or 'lines' if you don't want markers
+                    name='U<sub>1</sub> loss'
+                )
+            )
+            # append the u2 loss plot
+            updated_2d_plot1_figure.add_trace(
+                go.Scatter(
+                    x=list(range(1, len(u2_loss) + 1)), 
+                    y=u2_loss, 
+                    mode='lines+markers',  # or 'lines+markers' if you want markers
+                    name='U<sub>2</sub> loss'
+                )
+            )
+
+            # Update the layout for the figure
+            updated_2d_plot1_figure.update_layout(
+                title="Loss Monitor",
+                xaxis_title="epoch",
+                yaxis_title="loss",
+                width=400,
+                height=200
+            )
+
+            updated_2d_plot2_figure = px.line(x=list(range(1, len(u1_loss) + 1)), y=fdp_est, title="Estimated FDP", width=400, height=200, markers=True
                                     , labels={'x':'epoch', 'y':'FDP'})
             updated_2d_plot2_figure.add_hline(y=Config.threshold, line_dash="dash", line_color="red")
             updated_2d_plot2_figure.update_yaxes(range=[0, 1.0])

@@ -2,7 +2,8 @@
 
 The `deepfdr` package provides a fully unsupervised, deep learning based FDR control method designed for spatial multiple testing. We utilize the [W-Net](https://arxiv.org/abs/1711.08506) and the concept of [local index of significance (LIS)](https://academic.oup.com/jrsssb/article/71/2/393/7092902) to connect unsupervised image segmentation to a 3D multiple testing problem that enables false discovery rate (FDR) control with a significant boost in statistical power. We tested our methodology using test statistics generated from FDG-PET data available at [ADNI database](https://adni.loni.usc.edu/). For specific details on methodology or training, please refer to our paper:
 
-T. Kim, H. Shu, Q. Jia, and M. de Leon (2023). [DeepFDR: A Deep Learning-based False Discovery Rate Control Method for Neuroimaging Data](https://arxiv.org/abs/2310.13349v1). arXiv preprint arXiv:2310.13349.
+T. Kim, H. Shu, Q. Jia, and M. de Leon (2023). [DeepFDR: A Deep Learning-based False Discovery Rate Control Method for Neuroimaging Data]( 	
+https://doi.org/10.48550/arXiv.2310.13349). arXiv preprint arXiv:2310.13349. Accepted by AISTATS 2024.
 
 ## Table of Contents
 * [Requirements and Installation](#requirements-and-installation)

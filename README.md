@@ -39,5 +39,17 @@ python train.py --labelpath {optional groundtruth file if using for simulation}
 The following figure illustrates a training session, where the dashed red line indicates the nominal FDR threshold:
 ![gui_image](https://github.com/kimtae55/DeepFDR/blob/main/figs/gui_sample.png)
 
+## Citing our work using bibtex
+@inproceedings{kim2024deepfdr,
+  title={DeepFDR: A Deep Learning-based False Discovery Rate Control Method for Neuroimaging Data},
+  author={Kim, Taehyo and Shu, Hai and Jia, Qiran and de Leon, Mony},
+  booktitle={International Conference on Artificial Intelligence and Statistics},
+  pages={946--954},
+  year={2024},
+  organization={PMLR}
+}
+
 ## Updates
 New updates to improving the model, app stability and user experience will be posted here. 
+
+

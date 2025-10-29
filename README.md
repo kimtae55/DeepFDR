@@ -5,24 +5,6 @@ The `deepfdr` package provides a fully unsupervised, deep learning based FDR con
 T. Kim, H. Shu, Q. Jia, and M. de Leon (2023). [DeepFDR: A Deep Learning-based False Discovery Rate Control Method for Neuroimaging Data]( 	
 https://proceedings.mlr.press/v238/kim24b.html). Proceedings of The 27th International Conference on Artificial Intelligence and Statistics (AISTATS), PMLR 238:946-954, 2024.
 
-## Table of Contents
-* [Requirements and Installation](#requirements-and-installation)
-* [Usage](#usage)
-* [Updates](#updates)
-
-## Requirements and Installation
-This package was developed using Python 3.9 and Pytorch 1.10.1 - please install the compatible version of Pytorch at [https://pytorch.org/](https://pytorch.org/).
-To install the package, please run the following lines:
-```bash
-# Optional: upgrade pip
-pip install --upgrade pip setuptools wheel
-```
-```bash
-git clone https://github.com/kimtae55/DeepFDR
-cd $PATH_TO_DeepFDR$
-python setup.py install
-```
-
 ## Usage
 The software offers two distinct training modalities: an interactive training interface leveraging Dash and Plotly for a dynamic, web-app-based training, and a standalone training option for those preferring operation without the web application. If one wants to activate the GUI, use the ```train_gui``` module:
 ```bash
@@ -38,6 +20,20 @@ python train.py --labelpath {optional groundtruth file if using for simulation}
 ```
 The following figure illustrates a training session, where the dashed red line indicates the nominal FDR threshold:
 ![gui_image](https://github.com/kimtae55/DeepFDR/blob/main/figs/gui_sample.png)
+
+
+## Requirements and Installation
+This package was developed using Python 3.9 and Pytorch 1.10.1 - please install the compatible version of Pytorch at [https://pytorch.org/](https://pytorch.org/).
+To install the package, please run the following lines:
+```bash
+# Optional: upgrade pip
+pip install --upgrade pip setuptools wheel
+```
+```bash
+git clone https://github.com/kimtae55/DeepFDR
+cd $PATH_TO_DeepFDR$
+python setup.py install
+```
 
 ## Citing our work using bibtex
 @inproceedings{kim2024deepfdr,
